@@ -4,8 +4,9 @@
 #
 # Live test with the real programs on Windows (dev-starterkit 06 T5): the
 # newest yt-dlp through the real signature check, the pinned FFmpeg and
-# Deno, and one real download. By hand, and once a week, because yt-dlp and
-# the sites change without VideoCatcher changing.
+# Deno, and one real download. By hand, once a week (yt-dlp and the sites
+# change without VideoCatcher changing), and on every push that changes the
+# parts that fetch the programs or talk to yt-dlp.
 name: Live test
 
 on:
@@ -16,6 +17,20 @@ on:
         required: false
   schedule:
     - cron: '17 4 * * 1'
+  push:
+    paths:
+      - 'ytdlp.go'
+      - 'pgp.go'
+      - 'tools.go'
+      - 'toolbox.go'
+      - 'download.go'
+      - 'runtime.json'
+      - 'options.go'
+      - 'progress.go'
+      - 'proc*.go'
+      - 'queue.go'
+      - 'live_test.go'
+      - '.github/workflows/live.yml'
 
 permissions:
   contents: read
