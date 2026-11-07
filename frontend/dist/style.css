@@ -1,0 +1,61 @@
+/* VideoCatcher (https://github.com/burnersen/VideoCatcher)
+   Copyright (C) 2026 burnersen
+   SPDX-License-Identifier: GPL-3.0-only
+
+   Colours are variables: light by default, dark when Windows is dark.
+   --bg must match BackgroundColour in main.go, or the window flashes. */
+:root {
+  --bg: #f6f6f8;
+  --fg: #1d1d1f;
+  --muted: #5f5f66;
+  --box: #ffffff;
+  --border: #d9d9de;
+  --accent: #2563eb;
+  --error-bg: #fdecec;
+  --error-fg: #8a1c1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161618;
+    --fg: #ececf0;
+    --muted: #a0a0a8;
+    --box: #222226;
+    --border: #3a3a40;
+    --accent: #6ea0ff;
+    --error-bg: #3a1d1d;
+    --error-fg: #ffb4b4;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+main { padding: 24px 28px; }
+h1 { margin: 0 0 4px; font-size: 22px; }
+.lead { margin: 0 0 18px; color: var(--muted); }
+button {
+  font: inherit;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+.status { margin-left: 12px; color: var(--muted); }
+.box {
+  margin-top: 18px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--box);
+}
+.box p { margin: 4px 0; overflow-wrap: anywhere; }
+.label { display: inline-block; min-width: 72px; color: var(--muted); }
+.error { background: var(--error-bg); color: var(--error-fg); border-color: transparent; }
+.error .msg { font-weight: 600; }
+footer { padding: 0 28px 16px; color: var(--muted); font-size: 12px; }
