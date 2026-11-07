@@ -1,7 +1,7 @@
 # How links reach VideoCatcher from outside
 
 VideoCatcher is built to be the one download manager for links from
-everywhere: its own window, the command line, web pages and, later, a browser
+everywhere: its own window, the command line, web pages and the browser
 extension. All ways end in the same place (`App.accept` in `app.go`) and use
 the settings of the window for quality, folder and file name.
 
@@ -36,13 +36,46 @@ Download it?" until you click "Download". The registration lives only in
 your user's part of the registry (`HKEY_CURRENT_USER\Software\Classes\videocatcher`)
 and needs no administrator rights; turning the setting off removes it.
 
-## 3. Request files (for the browser extension)
+## 3. The browser extension
 
-The browser extension (planned) talks to a small helper through the
-browser's [native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging).
-The browser starts the helper itself, and only for the extension named in
-the helper's manifest; there is no open network port that a web page could
-reach. The helper:
+The extension (`extension/`, for Firefox, Chrome and Edge) talks to a helper
+through the browser's [native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging).
+The helper is `VideoCatcher.exe` itself, started by the browser without a
+window (`nativehost.go`). The browser starts it only for the extension named
+in the helper's manifest (Chrome and Edge: ID `lmloindgceipinokjbodjgcbfmihmlhd`,
+fixed by the `key` in the extension's manifest; Firefox:
+`videocatcher@burnersen.de`); there is no open network port that a web page
+could reach.
+
+"Allow the browser extension" in the settings writes the two manifests to
+`%LOCALAPPDATA%\VideoCatcher\native\` and points these keys at them, all
+below `HKEY_CURRENT_USER`:
+
+```
+Software\Google\Chrome\NativeMessagingHosts\de.burnersen.videocatcher
+Software\Chromium\NativeMessagingHosts\de.burnersen.videocatcher
+Software\Microsoft\Edge\NativeMessagingHosts\de.burnersen.videocatcher
+Software\Mozilla\NativeMessagingHosts\de.burnersen.videocatcher
+```
+
+Turning it off removes the keys. A copy of `VideoCatcher.exe` in another
+folder takes the keys over at its start.
+
+### Messages
+
+Each message is 4 bytes of length (little endian) and then JSON, both ways.
+
+| From the extension | Reply |
+|---|---|
+| `{"type":"ping"}` | `{"ok":true,"version":"0.2.0"}` |
+| `{"type":"add","url":...,"pageUrl":...,"title":...,"referer":...,"fileName":...,"cookies":...}` | `{"ok":true}` or `{"ok":false,"code":"bad-link"\|"start"\|"bad-message"\|"inbox","error":"..."}` |
+
+`code` `start` means the window could not be started; the request stays in
+the inbox and is taken at the next start.
+
+### Request files
+
+For an `add`, the helper:
 
 1. writes the request as a file into `%LOCALAPPDATA%\VideoCatcher\inbox\`,
    named `<8 to 64 letters, digits or dashes>.json`,
@@ -61,6 +94,7 @@ The file holds, in version 1:
   "pageUrl": "https://example.org/watch/123",
   "title": "Title of the page",
   "referer": "https://example.org/",
+  "fileName": "Title of the page",
   "source": "extension",
   "cookies": "# Netscape HTTP Cookie File\n..."
 }
@@ -71,6 +105,7 @@ The file holds, in version 1:
 | `v` | Format version. Anything but 1 is refused. |
 | `url` | The link for yt-dlp: a page or a media stream (m3u8, mpd, mp4). http and https only. |
 | `pageUrl`, `title`, `referer` | Optional. The title is shown in the list, the referer is sent with the download (some sites need it for streams). |
+| `fileName` | Optional. A name for the file without ending; characters Windows does not allow become spaces. The extension sends the page title for streams, whose links have no name of their own. Not used for a whole playlist. |
 | `source` | `extension` starts the download like a link from the window. Anything else waits for the user's OK. |
 | `cookies` | Optional. The cookies of the site in the Netscape cookie file format, for videos you only see when logged in. |
 

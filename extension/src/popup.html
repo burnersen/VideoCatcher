@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<!-- VideoCatcher (https://github.com/burnersen/VideoCatcher)
+     Copyright (C) 2026 burnersen
+     SPDX-License-Identifier: GPL-3.0-only -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="bar">
+    <span class="wordmark">Video-Catcher</span>
+    <span id="status" class="status"></span>
+  </header>
+
+  <section id="not-connected" class="notice" hidden>
+    <p data-i18n="notConnected"></p>
+  </section>
+
+  <section id="need-access" class="notice" hidden>
+    <p data-i18n="allowSitesHint"></p>
+    <button id="allow-sites" type="button" class="primary" data-i18n="allowSites"></button>
+  </section>
+
+  <section class="page">
+    <button id="send-page" type="button" class="primary" data-i18n="sendPage"></button>
+    <p class="hint" data-i18n="sendPageHint"></p>
+    <p id="page-result" class="result" hidden></p>
+  </section>
+
+  <section class="found">
+    <div class="found-head">
+      <h2 data-i18n="found"></h2>
+      <button id="clear" type="button" class="ghost small" data-i18n="clear"></button>
+    </div>
+    <p id="nothing" class="hint" data-i18n="nothingFound"></p>
+    <ol id="items" class="items"></ol>
+  </section>
+
+  <footer class="foot">
+    <label class="check"><input id="with-cookies" type="checkbox"> <span data-i18n="withCookies"></span></label>
+    <p class="hint" data-i18n="withCookiesHint"></p>
+  </footer>
+
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

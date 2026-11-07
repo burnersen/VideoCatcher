@@ -53,6 +53,11 @@ What VideoCatcher does on the network, and only for that:
   click "Check for updates".
 - GitHub, to download FFmpeg and Deno once, when they are missing.
 
+The browser extension makes no requests of its own. It keeps the list of
+videos a page loaded in the browser's memory and sends a link (and, only if
+you tick it, the site's cookies) to VideoCatcher on the same PC when you
+click, through the browser's native messaging, never over the network.
+
 There is no telemetry, no account and no advertising. VideoCatcher never
 sends your links, your history or your cookies anywhere except to the site
 the link points to.

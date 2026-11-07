@@ -48,6 +48,7 @@ function backend(over) {
     Clipboard: async () => "https://example.org/v",
     ClearFinished: async () => [],
     BrowserLinks: async () => false,
+    BrowserExtension: async () => false,
   };
   return Object.assign(b, over || {});
 }
@@ -234,6 +235,21 @@ function backend(over) {
     check("error hint", q.el("error-hint").textContent === "Check the link.");
     check("info hidden after an error", q.el("info").hidden === true);
     check("button enabled after an error", q.el("lookup").disabled === false);
+  }
+
+  // Settings: the browser extension is turned on through Go.
+  {
+    const calls = [];
+    const x = loadPage(backend({ SaveSettings: async () => {}, SetBrowserExtension: async (on) => { calls.push(on); } }));
+    await x.docListeners.DOMContentLoaded();
+    x.ui.openSettings();
+    await new Promise((r) => setImmediate(r));
+    check("extension switch off at first", x.el("set-browser-ext").checked === false);
+    x.el("set-browser-ext").checked = true;
+    await x.el("set-save").click();
+    check("extension switch calls Go", JSON.stringify(calls) === "[true]", calls);
+    await x.el("set-save").click();
+    check("unchanged switch does not call again", calls.length === 1, calls);
   }
 
   // The preview is there before anything is looked up.

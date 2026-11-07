@@ -25,6 +25,8 @@ gofmt -l .                      # muss leer bleiben
 GOOS=windows go vet ./...
 go test -race -count=1 ./...
 node frontend/app_check.js      # Seite ohne Browser prüfen (lädt i18n.js und app.js)
+node extension/extension_check.js   # Erweiterung ohne Browser prüfen
+node extension/build.js 1.2.3   # Erweiterung bauen: extension/dist/chromium und extension/dist/firefox
 wails build -platform windows/amd64 -skipbindings -trimpath   # nur unter Windows
 ```
 
@@ -32,7 +34,7 @@ Release: Tag `v1.2.3` pushen, vorher `.github/release-notes/1.2.3.md` schreiben 
 
 ## Aufbau
 
-Siehe Kopfkommentar in `main.go` (Liste aller Dateien). Kurz: `queue.go` ist der Download-Manager (ein yt-dlp-Lauf je Auftrag), `options.go` macht aus den Einstellungen die Argumentliste, `toolbox.go`/`tools.go`/`ytdlp.go` holen und prüfen yt-dlp, FFmpeg und Deno, `intake.go` nimmt Links von außen an (Format in `docs/browser-bridge.md`). Die Logik ist frei von Wails und läuft in den Tests unter Linux; nur `app.go` und `main.go` brauchen Wails. Jede Methode in `app.go` gibt Fehler nur über `uiError` an die Seite (erste Zeile Meldung, zweite Zeile Hinweis), die technische Ursache geht ins Log. Ein Fehler beim Start zeigt ein Meldungsfenster (`showFatal`), nie `log.Fatal`. Die Seite liegt in `frontend/dist` (HTML, CSS, JS getrennt, kein npm), geprüft wird sie mit `frontend/*_check.js`. `logging.go`, `paths.go` und `files.go` sind dieselben wie in der Vorlage `go-cli`.
+Siehe Kopfkommentar in `main.go` (Liste aller Dateien). Kurz: `queue.go` ist der Download-Manager (ein yt-dlp-Lauf je Auftrag), `options.go` macht aus den Einstellungen die Argumentliste, `toolbox.go`/`tools.go`/`ytdlp.go` holen und prüfen yt-dlp, FFmpeg und Deno, `intake.go` nimmt Links von außen an (Format in `docs/browser-bridge.md`). Die Logik ist frei von Wails und läuft in den Tests unter Linux; nur `app.go` und `main.go` brauchen Wails. Jede Methode in `app.go` gibt Fehler nur über `uiError` an die Seite (erste Zeile Meldung, zweite Zeile Hinweis), die technische Ursache geht ins Log. Ein Fehler beim Start zeigt ein Meldungsfenster (`showFatal`), nie `log.Fatal`. Die Seite liegt in `frontend/dist` (HTML, CSS, JS getrennt, kein npm), geprüft wird sie mit `frontend/*_check.js`. Die Browser-Erweiterung liegt in `extension/src` (Manifest V3, eine Codebasis, `build.js` macht daraus die Fassung für Chrome/Edge und für Firefox); sie spricht über Native Messaging mit `VideoCatcher.exe` selbst (`nativehost.go`, ohne Fenster). Die Chrome-ID hängt am `key` im Manifest, `TestExtensionIDMatchesKey` prüft das. Skripte, die zusammen geladen werden (`common.js` mit `background.js` oder `popup.js`), teilen einen globalen Namensraum: `common.js` hält alles in einer Funktion. `logging.go`, `paths.go` und `files.go` sind dieselben wie in der Vorlage `go-cli`.
 
 ## Bewusste Abweichungen vom Kit
 

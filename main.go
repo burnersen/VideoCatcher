@@ -13,6 +13,7 @@
 //	app.go       everything the page may call; small methods, one job each
 //	appinfo.go   name and version
 //	intake.go    links from outside: --add, videocatcher://, request files
+//	nativehost*.go  the helper the browser extension talks to
 //	queue.go     the download manager: jobs, parallel runs, queue.json
 //	options.go   the settings of a download and yt-dlp's argument list
 //	probe.go     what is behind a link (yt-dlp -J), file name preview
@@ -37,6 +38,7 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
+	"os"
 	"syscall"
 	"unsafe"
 
@@ -55,6 +57,15 @@ const singleInstanceID = "VideoCatcher-33ea85f3-9783-4a35-820b-913c5416f52c"
 
 func main() {
 	paths, err := defaultPaths()
+	// Started by a browser for the extension: no window, only stdin and
+	// stdout (nativehost.go). A message box would hang the browser's call.
+	if isNativeHostStart(os.Args[1:]) {
+		if err != nil {
+			writeNativeMessage(os.Stdout, nativeReply{Error: err.Error(), Code: "start"}) // ignore: nothing else to tell
+			os.Exit(1)
+		}
+		os.Exit(runNativeHost(paths, os.Stdin, os.Stdout))
+	}
 	if err != nil {
 		showFatal("could not find its folders", err)
 		return

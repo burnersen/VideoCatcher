@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "short_name": "Video-Catcher",
+  "description": "__MSG_extDescription__",
+  "version": "0.0.0",
+  "default_locale": "en",
+  "homepage_url": "https://github.com/burnersen/VideoCatcher",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2Dci7N7cFBKhnGtYMmVEfnlLwMvinU2KjcDNemslSYUP9x9rQXKr3NZWHKoSv1ghSbTz4aCR4HBZXq8x4+ZgupuQ2RPS3leb4Cn5LPbEBjGTC7FdJijJDOypsOEcXjr8P/CWvR96we8FxGBmULr1zvfklms6XEFH+8qnop+ELCJKLLsgxvWqYN8UXLV8xJC3f3ZbrQvnRDE0ndonSuJ97/JaZiyrSg72jS0T6l6L+TgDjUBnmJwmSKLSjtcfO9sYFdoZKPDRlXTSPekTy3GCowW6AI2iCYmx1sXKeVHoiig/htMeLC1YySGZ8VYcKqaX4AuEtZUiiSVB/lp9019unwIDAQAB",
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "__MSG_extName__",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png" }
+  },
+  "permissions": ["nativeMessaging", "webRequest", "storage", "contextMenus", "cookies"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "videocatcher@burnersen.de",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": { "required": ["none"] }
+    },
+    "gecko_android": { "strict_min_version": "142.0" }
+  }
+}

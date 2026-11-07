@@ -84,6 +84,7 @@ const ui = {
   infoLink: "", // the link as it was typed when it was looked up
   tools: [],
   browserLinks: false,
+  browserExt: false,
   formatId: "", // a format chosen by hand, or ""
   jobs: new Map(),
   logLines: [],
@@ -558,9 +559,12 @@ const ui = {
     this.el("set-watch-clipboard").checked = s.watchClipboard;
     this.el("set-use-current").checked = false;
     this.el("set-browser-links").checked = false;
+    this.el("set-browser-ext").checked = false;
     const app = this.backend();
     if (app) {
       app.BrowserLinks().then((on) => { this.el("set-browser-links").checked = on; this.browserLinks = on; })
+        .catch((err) => this.showError(err, "set-error"));
+      app.BrowserExtension().then((on) => { this.el("set-browser-ext").checked = on; this.browserExt = on; })
         .catch((err) => this.showError(err, "set-error"));
     }
     this.el("settings").showModal();
@@ -584,6 +588,11 @@ const ui = {
       await app.SaveSettings(next);
       const links = this.el("set-browser-links").checked;
       if (links !== !!this.browserLinks) await app.SetBrowserLinks(links);
+      const ext = this.el("set-browser-ext").checked;
+      if (ext !== !!this.browserExt) {
+        await app.SetBrowserExtension(ext);
+        this.browserExt = ext;
+      }
       const langChanged = next.language !== s.language;
       this.init.settings = Object.assign({}, next, { defaults: Object.assign({}, next.defaults, { outputDir: folder }) });
       this.el("settings").close();

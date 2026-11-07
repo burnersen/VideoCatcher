@@ -29,8 +29,8 @@
 
 ---
 
-> **Status:** in development, no release yet. The window is built and tested by CI on every
-> push; the first version follows once it has been tried on real PCs.
+> **Status:** early versions (0.x), in use and growing. The window is built and tested by CI on
+> every push.
 
 ## ⚡ 30 seconds, no manual
 
@@ -46,7 +46,8 @@
 - **A real download manager:** a list with progress, speed and time left, several downloads at the same time, stop and try again, and the list survives a restart.
 - **yt-dlp stays up to date by itself,** and safely: a new yt-dlp is only used if its release is signed by the yt-dlp release key built into Video-Catcher.
 - **Errors in plain words:** "The site only shows this video to logged-in users" instead of a Python traceback, with what to do about it. What yt-dlp said is one click away.
-- **Links from outside:** `VideoCatcher.exe --add <link>`, `videocatcher://` links and a bookmarklet, and a browser extension is planned ([how it works](docs/browser-bridge.md)).
+- **Straight from the browser:** the Video-Catcher extension for Firefox, Chrome and Edge sees which videos a page loads, also inside embedded players, and sends them with one click ([below](#-browser-extension)).
+- **Links from outside:** `VideoCatcher.exe --add <link>`, `videocatcher://` links and a bookmarklet ([how it works](docs/browser-bridge.md)).
 - **English and German,** light or dark like Windows.
 
 ### What it never does
@@ -56,6 +57,24 @@
 - A link from a web page never starts a download by itself. It waits in the list until you click **Download**.
 - Your browser's logins (cookies) are never saved in the list, the log or a command line. A cookie file made for one download is deleted when that download ends.
 - No telemetry, no account, no advertising.
+
+## 🧩 Browser extension
+
+Some pages show a video without a link yt-dlp can use: the player is built by the page's scripts, often inside an embedded frame from another site, and often only after you click a play button. The extension watches what the page really loads and lists the videos it saw (HLS and DASH streams, video files) in its toolbar button.
+
+**How to use it:** open the page, start the video (if the page offers several players or hosts, click one), then click the Video-Catcher button in the toolbar and **Download** next to the video. **Send this page** sends the address of the page itself, which is best for the sites yt-dlp knows (YouTube and many more). There is also a right-click menu for pages, links and videos. A video from the extension gets the page title as its file name, and it is downloaded with the settings of the window.
+
+**Install it once:**
+
+1. In Video-Catcher, open **Settings** and turn on **Allow the browser extension**. This tells the browsers where Video-Catcher is (only for your Windows user, no administrator rights).
+2. Download the extension from the [latest release](https://github.com/burnersen/VideoCatcher/releases/latest):
+   - **Firefox:** `VideoCatcher-extension-firefox.xpi`, open it in Firefox (or drag it into the window) and confirm. If the release has only `VideoCatcher-extension-firefox.zip` (not signed by Mozilla yet), Firefox can load it until the next restart: `about:debugging` > This Firefox > Load Temporary Add-on > choose the zip.
+   - **Chrome and Edge:** unpack `VideoCatcher-extension-chromium.zip` into a folder that stays (for example `Documents\VideoCatcher-extension`). Open `chrome://extensions` (Edge: `edge://extensions`), turn on **Developer mode**, click **Load unpacked** and choose that folder.
+3. Click the puzzle piece in the toolbar and pin Video-Catcher. The button should say "Connected to Video-Catcher".
+
+**What it may do, and why:** see the requests of the pages (to find videos), keep a list per tab in the browser's memory until the tab or browser closes, add a right-click menu, read a site's cookies only when you tick "Send the site's login along", and talk to Video-Catcher on this PC. It sends nothing to the internet and nothing anywhere before you click. If you moved `VideoCatcher.exe`, start it once from its new place; it updates what the browsers know.
+
+The extension cannot get around DRM, and it cannot download what a site keeps from you.
 
 ## 🔧 Settings
 
@@ -91,7 +110,8 @@ An invalid value is reported in the activity log, and its default is used instea
 | yt-dlp, FFmpeg, Deno | `%LOCALAPPDATA%\VideoCatcher\bin\` |
 | Download list | `%LOCALAPPDATA%\VideoCatcher\queue.json` |
 | Unfinished parts | `%LOCALAPPDATA%\VideoCatcher\partial\` (removed when a download ends) |
-| Log | `%LOCALAPPDATA%\VideoCatcher\logs\videocatcher.log` |
+| Log | `%LOCALAPPDATA%\VideoCatcher\logs\videocatcher.log` (the helper of the extension: `native-host.log` next to it) |
+| What the browsers know about the extension's helper | `%LOCALAPPDATA%\VideoCatcher\native\` and `HKEY_CURRENT_USER\Software\...\NativeMessagingHosts\de.burnersen.videocatcher` (Chrome, Chromium, Edge, Mozilla) |
 
 **Portable:** put an empty file `portable.txt` next to the exe, and everything stays in that folder. The log never grows past 2 MB; three older parts are kept.
 
@@ -102,7 +122,7 @@ An invalid value is reported in the activity log, and its default is used instea
 - GitHub, to download FFmpeg and Deno once, when they are missing. Both are pinned to one version by size and SHA-256 ([runtime.json](runtime.json)).
 - The preview pictures of the videos you look up, from the site itself.
 
-Nothing else. Details in [CODE_SIGNING.md](CODE_SIGNING.md#privacy-policy).
+The browser extension itself makes no requests of its own; it only talks to Video-Catcher on this PC. Nothing else. Details in [CODE_SIGNING.md](CODE_SIGNING.md#privacy-policy).
 
 ## 💻 Requirements
 
@@ -120,6 +140,8 @@ You need Go (the version in [`go.mod`](go.mod)) and, for the page checks, Node.j
 ```
 go test ./...
 node frontend/app_check.js
+node extension/extension_check.js
+node extension/build.js 1.2.3      # the extension for Chrome/Edge and Firefox in extension/dist
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 wails build -platform windows/amd64 -skipbindings -trimpath
 ```

@@ -35,3 +35,6 @@ node_modules/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# The built extension (extension/build.js); made fresh by the release.
+extension/dist/

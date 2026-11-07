@@ -12,10 +12,10 @@ package main
 //	                                       a link on a web page or a
 //	                                       bookmarklet (after the user turned
 //	                                       browser links on in the settings)
-//	VideoCatcher.exe --request <name>      the browser extension (later): its
-//	                                       helper writes a request file into
-//	                                       the inbox and starts VideoCatcher
-//	                                       with the file's name
+//	VideoCatcher.exe --request <name>      the browser extension: its helper
+//	                                       (nativehost.go) writes a request
+//	                                       file into the inbox and starts
+//	                                       VideoCatcher with the file's name
 //
 // If VideoCatcher already runs, the new start only hands its arguments to
 // the running window (Wails single instance lock) and ends. A request file
@@ -50,9 +50,10 @@ type intakeRequest struct {
 	PageURL    string `json:"pageUrl,omitempty"`
 	Title      string `json:"title,omitempty"`
 	Referer    string `json:"referer,omitempty"`
-	Source     string `json:"source"`            // extension, cli, protocol
-	Cookies    string `json:"cookies,omitempty"` // Netscape cookie file text, only from the extension
-	CookieFile string `json:"-"`                 // where the cookies were written for yt-dlp
+	FileName   string `json:"fileName,omitempty"` // a name for the file (from the page title); cleaned in safeFileName
+	Source     string `json:"source"`             // extension, cli, protocol
+	Cookies    string `json:"cookies,omitempty"`  // Netscape cookie file text, only from the extension
+	CookieFile string `json:"-"`                  // where the cookies were written for yt-dlp
 }
 
 const (

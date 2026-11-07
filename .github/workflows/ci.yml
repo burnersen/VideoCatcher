@@ -61,6 +61,15 @@ jobs:
           for f in frontend/dist/*.js; do node --check "$f"; done
           for c in "${checks[@]}"; do echo "--- $c"; node "$c"; done
 
+      # The browser extension: its own checks, then Mozilla's linter on the
+      # Firefox build (catches manifest keys a Firefox version does not know).
+      - name: extension checks
+        run: |
+          for f in extension/src/*.js extension/*.js; do node --check "$f"; done
+          node extension/extension_check.js
+          node extension/build.js 0.0.1
+          npx --yes web-ext@10.8.0 lint --source-dir extension/dist/firefox --warnings-as-errors
+
   windows:
     runs-on: windows-latest
     needs: test

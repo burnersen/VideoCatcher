@@ -94,6 +94,7 @@ jobs:
         run: |
           go test -count=1 ./...
           for c in frontend/*_check.js; do node "$c"; done
+          node extension/extension_check.js
 
       - name: build
         run: |
@@ -107,6 +108,32 @@ jobs:
           wails build -platform windows/arm64 -skipbindings -trimpath -ldflags "$ldflags" -o VideoCatcher-arm64.exe
           cp build/bin/VideoCatcher-amd64.exe dist/VideoCatcher.exe
           cp build/bin/VideoCatcher-arm64.exe dist/VideoCatcher-arm64.exe
+
+      # The browser extension, same version. Chrome and Edge load the
+      # unpacked folder from the zip; Firefox needs a file signed by Mozilla
+      # (unlisted, for this release page only). Without the AMO keys in the
+      # repository's secrets there is only the unsigned zip, which Firefox
+      # loads until the next restart (about:debugging).
+      - name: extension
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          node extension/build.js "$NUMERIC"
+          npx --yes web-ext@10.8.0 lint --source-dir extension/dist/firefox --warnings-as-errors
+          (cd extension/dist/chromium && 7z a -tzip -bso0 "$GITHUB_WORKSPACE/dist/VideoCatcher-extension-chromium.zip" .)
+          (cd extension/dist/firefox && 7z a -tzip -bso0 "$GITHUB_WORKSPACE/dist/VideoCatcher-extension-firefox.zip" .)
+          if [ "$DRY_RUN" != true ] && [ -n "$AMO_JWT_ISSUER" ] && [ -n "$AMO_JWT_SECRET" ]; then
+            npx --yes web-ext@10.8.0 sign --source-dir extension/dist/firefox --channel unlisted \
+              --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET" --artifacts-dir "$RUNNER_TEMP/xpi"
+            cp "$RUNNER_TEMP"/xpi/*.xpi dist/VideoCatcher-extension-firefox.xpi
+          else
+            echo "::notice::Firefox extension not signed (dry run or no AMO keys)."
+          fi
+
+      - name: checksums
+        run: |
           (cd dist && sha256sum -- * > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
 

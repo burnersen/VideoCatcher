@@ -109,7 +109,23 @@ func (a *App) startup(ctx context.Context) {
 	if a.cfg.WatchClipboard {
 		go a.watchClipboard(ctx)
 	}
+	a.refreshNativeHost()
 	a.intake.handleArgs(os.Args[1:], a.accept)
+}
+
+// refreshNativeHost: the browser extension was turned on for a copy of
+// VideoCatcher in another folder (an update downloaded somewhere else).
+// The browsers then start this copy from now on.
+func (a *App) refreshNativeHost() {
+	exe, err := os.Executable()
+	if err != nil || nativeHostState(a.paths.DataDir, exe) != "moved" {
+		return
+	}
+	if err := registerNativeHost(a.paths.DataDir, exe); err != nil {
+		a.logger.Warn("browser extension helper not updated", "err", err)
+		return
+	}
+	a.logger.Info("browser extension helper now points here", "exe", exe)
 }
 
 func (a *App) shutdown(context.Context) {
@@ -170,6 +186,11 @@ func (a *App) accept(req intakeRequest) {
 	o := a.cfg.Defaults
 	o.OutputDir = a.downloadDirLocked()
 	a.mu.Unlock()
+	if o.Playlist != "all" {
+		// A stream from the extension has no title of its own for yt-dlp
+		// ("index-v1-a1"); the page's title is the better name.
+		o.FileName = safeFileName(req.FileName)
+	}
 	j, err := a.queue.Add(req.URL, o, req.Source, req.Referer, req.Title, req.CookieFile)
 	if err != nil {
 		if req.CookieFile != "" {
@@ -485,6 +506,31 @@ func (a *App) watchClipboard(ctx context.Context) {
 
 // BrowserLinks says whether videocatcher:// links open VideoCatcher.
 func (a *App) BrowserLinks() bool { return protocolRegistered() }
+
+// BrowserExtension says whether the browsers know VideoCatcher's helper
+// for the extension (nativehost.go).
+func (a *App) BrowserExtension() bool {
+	exe, err := os.Executable()
+	return err == nil && nativeHostState(a.paths.DataDir, exe) == "on"
+}
+
+// SetBrowserExtension tells Firefox, Chrome and Edge where the helper is,
+// or makes them forget it.
+func (a *App) SetBrowserExtension(on bool) error {
+	exe, err := os.Executable()
+	if err == nil {
+		if on {
+			err = registerNativeHost(a.paths.DataDir, exe)
+		} else {
+			err = unregisterNativeHost()
+		}
+	}
+	if err != nil {
+		return a.uiError(userError(err, "The browser extension could not be connected", "Try again. The log file has the details."))
+	}
+	a.logger.Info("browser extension helper", "on", on)
+	return nil
+}
 
 // SetBrowserLinks turns videocatcher:// links on or off for this user.
 func (a *App) SetBrowserLinks(on bool) error {

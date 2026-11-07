@@ -172,6 +172,35 @@ func (o DownloadOptions) checkFileName() error {
 	return nil
 }
 
+// safeFileName turns a title into a file name that checkFileName accepts:
+// reserved and invisible characters become spaces, runs of spaces one, no
+// space or dot at the ends, at most maxFileNameLen bytes. A name that is
+// still not valid (a device name, nothing left) gives "".
+func safeFileName(title string) string {
+	var b strings.Builder
+	space := false
+	for _, r := range title {
+		if r < 32 || r == 127 || strings.ContainsRune(`<>:"/\|?*`, r) || r == ' ' || r == '\u00a0' {
+			space = b.Len() > 0
+			continue
+		}
+		if space {
+			b.WriteByte(' ')
+			space = false
+		}
+		b.WriteRune(r)
+	}
+	n := strings.Trim(b.String(), " .")
+	if len(n) > maxFileNameLen {
+		n = strings.Trim(clip(n, maxFileNameLen-3), " .") // clip adds "..."; the dots are trimmed, the name stays short enough
+	}
+	o := DownloadOptions{FileName: n, Playlist: "single"}
+	if n == "" || o.checkFileName() != nil {
+		return ""
+	}
+	return n
+}
+
 // isWindowsDeviceName reports names Windows keeps for devices (CON, NUL,
 // COM1 ...), also with an extension after them ("nul.txt").
 func isWindowsDeviceName(n string) bool {
