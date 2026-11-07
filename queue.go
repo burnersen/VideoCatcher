@@ -375,8 +375,11 @@ func (q *queue) update(id string, l ytdlpLine) {
 		j.Stage, important = postStepLabel(l.PostStep), true
 	case lineItem:
 		j.Item, j.Items, j.ItemTitle, important = l.Index, l.Count, l.Title, true
-		if l.Count == 0 && l.Title != "" {
-			j.Title = l.Title // a single video: its real title
+		// A single video: its real title, unless the job has a name of its
+		// own. A stream from the extension has, and yt-dlp only knows the
+		// name of the stream file ("index-f3-v1-a1"); the page title is better.
+		if l.Count == 0 && l.Title != "" && j.Options.FileName == "" {
+			j.Title = l.Title
 		}
 		j.Percent, j.Done, j.Total = 0, 0, 0
 	case lineFile:

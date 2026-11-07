@@ -221,3 +221,22 @@ func TestSavedListHasNoCookies(t *testing.T) {
 		t.Fatalf("cookie file in the list: %s", b)
 	}
 }
+
+// A job with a name of its own keeps its title: for a stream from the
+// extension, yt-dlp's title is only the stream file's name (0.2.0).
+func TestOwnNameKeepsTitle(t *testing.T) {
+	r := &fakeRunner{lines: func([]string) []string {
+		return []string{"VCITEM NA|NA|index-f3-v1-a1|index-f3-v1-a1", "VCPROG finished|1000|1000|NA|NA|NA|NA|NA|0"}
+	}}
+	q, _ := newTestQueue(t, r)
+	o := testOptions(t)
+	o.FileName = "The page title"
+	j, err := q.Add("https://cdn.example.org/hls/index-f3-v1-a1.m3u8", o, "extension", "", "The page title", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "done", func() bool { return jobByID(q, j.ID).Status == jobDone })
+	if got := jobByID(q, j.ID).Title; got != "The page title" {
+		t.Fatalf("title %q", got)
+	}
+}
