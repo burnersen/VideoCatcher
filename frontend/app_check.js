@@ -18,12 +18,14 @@ const choices = {
   container: ["auto", "mp4", "mkv", "webm"], audioFormat: ["best", "mp3"], audioQuality: ["best", "192"],
   subMode: ["none", "embed", "file", "both"], playlist: ["single", "all"],
   sponsorBlock: ["off", "mark", "remove"], cookies: ["none", "firefox"],
+  closeButton: ["quit", "tray-if-running", "tray"], afterAll: ["none", "quit", "sleep", "hibernate", "shutdown"],
 };
 const defaults = {
   quality: "best", formatId: "", container: "auto", audioFormat: "best", audioQuality: "best",
   subLangs: "de,en", subMode: "none", autoSubs: false, outputDir: "D:\\Videos\\VideoCatcher",
   template: "%(title)s [%(id)s].%(ext)s", playlist: "single", playlistItems: "", embedThumbnail: false,
   embedMetadata: true, embedChapters: true, sponsorBlock: "off", rateLimit: "", fragments: 4, cookies: "none",
+  cleanNames: true,
 };
 const job = (over) => Object.assign({ id: "j1", url: "https://www.youtube.com/watch?v=abc", title: "A video",
   status: "running", stage: "downloading", percent: 42.7, done: 1048576, total: 10485760, speed: 524288,
@@ -33,8 +35,9 @@ function backend(over) {
   const calls = [];
   const b = {
     calls,
-    Initial: async () => ({ version: "1.2.3", settings: { defaults, downloadDir: "", parallel: 2, checkUpdates: true, language: "auto", watchClipboard: false },
-      defaultDir: defaults.outputDir, choices, tools: [{ tool: "yt-dlp", state: "ready", version: "2026.10.26", purpose: "downloads" }], jobs: [] }),
+    Initial: async () => ({ version: "1.2.3", settings: { defaults, downloadDir: "", parallel: 2, checkUpdates: true, language: "auto", watchClipboard: false, closeButton: "tray-if-running" },
+      defaultDir: defaults.outputDir, choices, tools: [{ tool: "yt-dlp", state: "ready", version: "2026.10.26", purpose: "downloads" }], jobs: [],
+      speed: { percent: 100, rate: 0, limit: 0, peak: 0, active: true }, afterAll: { action: "none", seconds: 0, waiting: false }, hasTray: true }),
     Probe: async (link, pl, ck) => { calls.push(["Probe", link, pl, ck]); return { url: link, title: "Found <b>it</b>", uploader: "Someone", site: "Youtube", duration: 212,
       thumbnail: "https://i.ytimg.com/x.jpg", heights: [1080, 720], formats: [{ id: "137", ext: "mp4", height: 1080, hasVideo: true, hasAudio: false, size: 1000 }],
       subtitles: ["de"], autoSubs: ["en-orig"], probeId: "p1" }; },
@@ -49,6 +52,14 @@ function backend(over) {
     ClearFinished: async () => [],
     BrowserLinks: async () => false,
     BrowserExtension: async () => false,
+    Pause: async (id) => { calls.push(["Pause", id]); },
+    Resume: async (id) => { calls.push(["Resume", id]); },
+    PauseAll: async () => { calls.push(["PauseAll"]); },
+    ResumeAll: async () => { calls.push(["ResumeAll"]); },
+    SetSpeed: async (pct) => { calls.push(["SetSpeed", pct]); return { percent: pct, rate: 0, limit: pct < 100 ? 1048576 * pct : 0, peak: 104857600, active: true }; },
+    SetAfterAll: async (a) => { calls.push(["SetAfterAll", a]); return { action: a, seconds: 0, waiting: true }; },
+    AbortAfterAll: async () => { calls.push(["AbortAfterAll"]); return { action: "none", seconds: 0, waiting: false }; },
+    SetTrayTexts: async (x) => { calls.push(["SetTrayTexts", x]); },
   };
   return Object.assign(b, over || {});
 }
@@ -80,7 +91,7 @@ function backend(over) {
   for (const k of new Set([...htmlKeys, ...jsKeys])) check(`text "${k}" exists`, en.includes(k));
   for (const prefix of ["q.", "s.", "p.", "sb.", "job.", "tools."]) {
     const need = { "q.": choices.quality, "s.": choices.subMode, "p.": choices.playlist, "sb.": choices.sponsorBlock,
-      "job.": ["waiting", "confirm", "running", "done", "failed", "cancelled"],
+      "job.": ["waiting", "confirm", "running", "done", "failed", "cancelled", "paused"],
       "tools.": ["missing", "downloading", "ready", "failed"] }[prefix];
     for (const v of need) check(`text "${prefix}${v}" exists`, en.includes(prefix + v));
   }
@@ -105,7 +116,7 @@ function backend(over) {
   // Look up: info shown, title as text, preview asked, button back.
   p.el("link").value = "https://www.youtube.com/watch?v=abc";
   await p.el("lookup").click();
-  check("looked up with the form's settings", JSON.stringify(b.calls[0]) === JSON.stringify(["Probe", "https://www.youtube.com/watch?v=abc", "single", "none"]));
+  check("looked up with the form's settings", JSON.stringify(b.calls.find((c) => c[0] === "Probe")) === JSON.stringify(["Probe", "https://www.youtube.com/watch?v=abc", "single", "none"]));
   check("info shown", p.el("info").hidden === false && p.el("info-title").textContent === "Found <b>it</b>");
   check("available heights marked", p.el("quality").innerHTML.includes("1080p, available"));
   check("format list escapes and lists", p.el("formats").innerHTML.includes('value="137"'));
@@ -181,6 +192,19 @@ function backend(over) {
   check("fill is a block", /display:\s*block/.test(rule(".fill")), rule(".fill"));
   check("track is a block", /display:\s*block/.test(rule(".track")), rule(".track"));
   check("title in column 2", /grid-column:\s*2;/.test(rule(".job .title")));
+  // A long link must not make the page wider than the window (0.2.0: the
+  // buttons ended up far to the right). A plain 1fr column is never
+  // narrower than its longest word.
+  check("job grid column can shrink", /minmax\(0, 1fr\)/.test(rule(".job")), rule(".job"));
+  check("layout column can shrink", /minmax\(0, 1fr\)/.test(rule(".layout")), rule(".layout"));
+  check("page column can shrink", /grid-template-columns:\s*minmax\(0, 1fr\)/.test(rule("body")), rule("body"));
+  for (const sel of [".job .meta", ".job .error-text", ".job .confirm-text", ".log-list li"]) {
+    check(`${sel} breaks long words`, /overflow-wrap:\s*anywhere/.test(rule(sel)), rule(sel));
+  }
+  const longLink = "https://example.org/" + "a".repeat(500);
+  check("long links are clipped for display", p.clipLong(longLink).length < 120 && p.clipLong(longLink).startsWith("https://example.org/aaa"));
+  check("short text is not clipped", p.clipLong("Link received: https://x.org/v") === "Link received: https://x.org/v");
+  check("confirm row shows a clipped link", !/<p class="confirm-text">[^<]*a{200}/.test(row({ status: "confirm", url: longLink })));
   check("buttons in column 3", /grid-column:\s*3;/.test(rule(".job .actions")));
   check("counts", p.el("jobs-counts").textContent === "1 running, 0 waiting", p.el("jobs-counts").textContent);
   p.events.job(job({ id: "j5", status: "done", percent: 100, files: ["C:\\a.mp4"] }));
@@ -273,6 +297,113 @@ function backend(over) {
     const g = loadPage(backend(), "de-DE");
     await g.docListeners.DOMContentLoaded();
     check("German texts", g.el("quality").innerHTML.includes("Nur Ton"));
+  }
+
+  // Choices from Go have texts: close button and "when all are done" come
+  // from the lists in config.go and afterall.go.
+  {
+    const goList = (file, name) => {
+      const src = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
+      const m = new RegExp(name + "\\s*=\\s*\\[\\]string\\{([^}]*)\\}").exec(src);
+      return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : [];
+    };
+    const close = goList("config.go", "closeChoices");
+    const after = goList("afterall.go", "afterAllChoices");
+    check("close choices found in Go", close.length === 3, close);
+    check("after-all choices found in Go", after.length === 5, after);
+    for (const v of close) check(`text "set.close.${v}" exists`, en.includes("set.close." + v));
+    for (const v of after) check(`text "after.${v}" exists`, en.includes("after." + v));
+    for (const v of after.filter((x) => x !== "none")) check(`text "after.count.${v}" exists`, en.includes("after.count." + v));
+  }
+
+  // Pause and continue: the buttons per state, the calls, the counts.
+  {
+    const b2 = backend();
+    const x = loadPage(b2, "de-DE");
+    await x.docListeners.DOMContentLoaded();
+    const r2 = (j) => x.ui.jobRow(job(j));
+    check("running: pause and stop", r2({}).includes('data-action="pause"') && r2({}).includes('data-action="cancel"'));
+    check("waiting: pause", r2({ status: "waiting" }).includes('data-action="pause"'));
+    const paused = r2({ status: "paused", percent: 63 });
+    check("paused: continue, stop, remove, keeps its percent", paused.includes('data-action="resume"') && paused.includes('data-action="cancel"') &&
+      paused.includes('data-action="remove"') && paused.includes(">63%<") && paused.includes("Pausiert"), paused);
+    await x.ui.onJobsClick({ target: target({ action: "pause", id: "j1" }) });
+    await x.ui.onJobsClick({ target: target({ action: "resume", id: "j1" }) });
+    check("pause and continue call Go", b2.calls.some((c) => c[0] === "Pause" && c[1] === "j1") && b2.calls.some((c) => c[0] === "Resume" && c[1] === "j1"));
+    await x.el("pause-all").click();
+    await x.el("resume-all").click();
+    check("pause all and continue all call Go", b2.calls.some((c) => c[0] === "PauseAll") && b2.calls.some((c) => c[0] === "ResumeAll"));
+    x.events.job(job({ id: "p1", status: "paused" }));
+    x.events.job(job({ id: "p2", status: "running" }));
+    check("counts with paused", x.el("jobs-counts").textContent === "1 aktiv, 0 wartend, 1 pausiert", x.el("jobs-counts").textContent);
+    check("stage continuing in German", x.ui.jobRow(job({ stage: "continuing" })).includes("macht weiter"));
+
+    // Tidy names: in the form and in what goes to Go; a change asks for a new preview.
+    check("tidy names checked from the defaults", x.el("clean-names").checked === true && x.ui.options().cleanNames === true);
+    x.el("clean-names").checked = false;
+    check("tidy names off goes to Go", x.ui.options().cleanNames === false);
+    check("tidy names change updates the preview", (x.el("clean-names").listeners.change || []).length === 1);
+
+    // Tray words in the page's language.
+    const tray = b2.calls.find((c) => c[0] === "SetTrayTexts");
+    check("tray texts sent in German", tray && tray[1].quit === "Beenden" && tray[1].running.includes("{n}"), tray);
+
+    // Speed slider: Go's numbers shown; moving it calls Go while moving and at the end.
+    check("speed slider from Go", x.el("speed").value === 100 && x.el("speed-pct").textContent === "100 %", x.el("speed").value);
+    x.el("speed").value = "40";
+    await x.el("speed").fire("input");
+    check("moving shows the new value at once", x.el("speed-pct").textContent === "40 %");
+    x.events.speed({ percent: 100, rate: 2097152, limit: 0, peak: 0, active: true });
+    check("Go's number does not jump the moving slider back", x.el("speed").value === "40");
+    await x.runTimers();
+    check("moving calls Go", b2.calls.some((c) => c[0] === "SetSpeed" && c[1] === 40));
+    x.el("speed").value = "25";
+    await x.el("speed").fire("change");
+    check("letting go calls Go", b2.calls.some((c) => c[0] === "SetSpeed" && c[1] === 25));
+    check("limit and 100 % shown", x.el("speed-info").textContent.includes("Grenze 25 MB/s") && x.el("speed-info").textContent.includes("100 % = 100 MB/s"), x.el("speed-info").textContent);
+    x.events.speed({ percent: 50, rate: 0, limit: 0, peak: 0, active: true });
+    check("not measured yet is said", x.el("speed-info").textContent.includes("gemessen"));
+    x.events.speed({ percent: 50, rate: 0, limit: 0, peak: 0, active: false });
+    check("slider off without the relay", x.el("speed").disabled === true);
+
+    // When all are done: choice, waiting hint, countdown, cancel.
+    check("after-all menu filled", x.el("after-all").innerHTML.includes("PC herunterfahren"));
+    x.el("after-all").value = "shutdown";
+    await x.el("after-all").fire("change");
+    check("choice goes to Go", b2.calls.some((c) => c[0] === "SetAfterAll" && c[1] === "shutdown"));
+    check("waiting hint shown", x.el("after-waiting").hidden === false);
+    x.events.afterall({ action: "shutdown", seconds: 3, waiting: false });
+    check("countdown shown", x.el("after-banner").hidden === false && x.el("after-text").textContent.includes("fährt in 3 s herunter"), x.el("after-text").textContent);
+    await x.runTimers();
+    check("countdown counts down", x.el("after-text").textContent.includes("in 0 s"), x.el("after-text").textContent);
+    await x.el("after-abort").click();
+    check("cancel calls Go and hides the banner", b2.calls.some((c) => c[0] === "AbortAfterAll") && x.el("after-banner").hidden === true && x.el("after-all").value === "none");
+
+    // Settings: the close button choice is saved.
+    x.ui.openSettings();
+    check("close button choice shown", x.el("set-close-button").value === "tray-if-running" && x.el("opt-close-button").hidden === false);
+  }
+
+  // Links dropped on the window: one is looked up, several are added, none is said.
+  {
+    const b3 = backend();
+    const d = loadPage(b3);
+    await d.docListeners.DOMContentLoaded();
+    const dt = (data, files) => ({ getData: (type) => data[type] || "", files: files || [] });
+    let prevented = 0;
+    await d.docListeners.dragover({ preventDefault: () => prevented++, dataTransfer: {} });
+    check("dragover is taken by the page", prevented === 1);
+    await d.docListeners.drop({ preventDefault: () => prevented++, dataTransfer: dt({ "text/uri-list": "https://example.org/one" }) });
+    check("one dropped link is looked up", prevented === 2 && d.el("link").value === "https://example.org/one" && b3.calls.some((c) => c[0] === "Probe" && c[1] === "https://example.org/one"));
+    await d.ui.onDrop(dt({ "text/plain": "see https://a.org/1 and https://b.org/2, also https://a.org/1" }));
+    const adds = b3.calls.filter((c) => c[0] === "Add").map((c) => c[1]);
+    check("several dropped links are added once each", JSON.stringify(adds) === JSON.stringify(["https://a.org/1", "https://b.org/2"]), adds);
+    check("added count shown", d.el("add-status").textContent === "2 links added");
+    await d.ui.onDrop(dt({}, [{ name: "Shortcut.url", size: 60, text: async () => "[InternetShortcut]\nURL=https://c.org/3\n" }]));
+    check("an Internet shortcut file works", d.el("link").value === "https://c.org/3");
+    await d.ui.onDrop(dt({ "text/plain": "no link here" }));
+    check("nothing to take is said", d.el("error").hidden === false && d.el("error-msg").textContent.includes("no link"));
+    check("linksIn trims punctuation", JSON.stringify(d.linksIn("(https://x.org/v).")) === JSON.stringify(["https://x.org/v"]));
   }
 
   // Outside the program (no Go side): a clear message, not a silent dead window.

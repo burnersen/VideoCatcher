@@ -6,13 +6,14 @@ package main
 
 // The download manager: a list of jobs, of which at most "parallel" run at
 // the same time. Each job is one run of yt-dlp. The list is saved in
-// queue.json after every change of state, so it survives a restart; a job
-// that was running when VideoCatcher ended starts again from the beginning
-// (yt-dlp continues a half download where it can).
+// queue.json after every change of state, so it survives a restart.
 //
 // Unfinished parts live in a folder of the job below the program's data
-// folder, never in the download folder; it is removed when the job ends,
-// however it ends (README promise: no half files in your folder).
+// folder, never in the download folder (README promise: no half files in
+// your folder). The folder stays while a job is paused, and when
+// VideoCatcher ends during a download: the next run of yt-dlp continues
+// the parts where they stopped. It goes when the job is done, failed,
+// stopped or removed.
 
 import (
 	"context"
@@ -33,6 +34,7 @@ const (
 	jobConfirm   = "confirm" // came from outside (a web page); waits for the user's OK
 	jobWaiting   = "waiting"
 	jobRunning   = "running"
+	jobPaused    = "paused" // stopped by the user, parts kept; waits for "Continue"
 	jobDone      = "done"
 	jobFailed    = "failed"
 	jobCancelled = "cancelled"
@@ -63,6 +65,11 @@ type Job struct {
 	Added     time.Time       `json:"added"`
 	Started   time.Time       `json:"started,omitempty"`
 	Ended     time.Time       `json:"ended,omitempty"`
+	Resumable bool            `json:"resumable,omitempty"` // parts of an earlier run are kept; yt-dlp continues them
+	// CookieName is the name of the job's cookie file in the cookie folder,
+	// so a paused job still has its login after a restart. Only the name:
+	// the cookies themselves never go into queue.json.
+	CookieName string `json:"cookieName,omitempty"`
 
 	cookieFile string // from the browser extension; deleted when the job ends
 }
@@ -76,13 +83,15 @@ const (
 )
 
 type queue struct {
-	r        runner
-	ts       toolSet
-	have     func(tool string) bool
-	tempRoot string // parts of unfinished downloads
-	file     string // queue.json
-	logger   *slog.Logger
-	onChange func(Job) // the window; may be nil
+	r         runner
+	ts        toolSet
+	have      func(tool string) bool
+	tempRoot  string // parts of unfinished downloads
+	cookieDir string // cookie files from the extension (intake.go writes them)
+	file      string // queue.json
+	logger    *slog.Logger
+	onChange  func(Job)     // the window; may be nil
+	proxy     func() string // the relay for the speed limit (speed.go); may be nil
 
 	mu       sync.Mutex
 	jobs     []*Job
@@ -92,14 +101,16 @@ type queue struct {
 	counter  int
 	lastSent map[string]time.Time
 	wg       sync.WaitGroup
-	closing  bool // stopping because VideoCatcher ends: running jobs wait for the next start
+	closing  bool            // stopping because VideoCatcher ends: running jobs wait for the next start
+	pausing  map[string]bool // running jobs the user paused; they end as paused, not stopped
 	closed   bool
 }
 
 func newQueue(r runner, ts toolSet, have func(string) bool, dataDir string, logger *slog.Logger) *queue {
 	return &queue{r: r, ts: ts, have: have, logger: logger, parallel: 2,
-		tempRoot: filepath.Join(dataDir, "partial"), file: filepath.Join(dataDir, "queue.json"),
-		cancel: map[string]context.CancelFunc{}, lastSent: map[string]time.Time{}}
+		tempRoot: filepath.Join(dataDir, "partial"), cookieDir: filepath.Join(dataDir, "cookies"),
+		file: filepath.Join(dataDir, "queue.json"), cancel: map[string]context.CancelFunc{},
+		lastSent: map[string]time.Time{}, pausing: map[string]bool{}}
 }
 
 type queueFile struct {
@@ -107,8 +118,11 @@ type queueFile struct {
 	Jobs   []*Job `json:"jobs"`
 }
 
-// load reads queue.json. Running jobs of the last session wait again.
+// load reads queue.json. Running jobs of the last session wait again and
+// continue their parts. Part folders and cookie files no job needs any
+// more (a crash, an old version) are removed.
 func (q *queue) load() error {
+	defer q.removeOrphans()
 	data, err := os.ReadFile(q.file)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -135,7 +149,12 @@ func (q *queue) load() error {
 			continue
 		}
 		if j.Status == jobRunning {
-			j.Status, j.Stage = jobWaiting, "interrupted, starts again"
+			j.Status, j.Stage, j.Resumable = jobWaiting, "interrupted, continues", true
+		}
+		if name := j.CookieName; name != "" && !isFinished(j.Status) {
+			if p := filepath.Join(q.cookieDir, name); filepath.Base(name) == name && fileExists(p) {
+				j.cookieFile = p
+			}
 		}
 		q.jobs = append(q.jobs, j)
 	}
@@ -195,6 +214,9 @@ func (q *queue) Add(link string, o DownloadOptions, source, referer, title, cook
 	j := &Job{ID: fmt.Sprintf("%x-%d", time.Now().UnixNano(), q.counter), URL: u, Title: title,
 		Source: source, Referer: referer, Options: o, Status: jobWaiting, Stage: "waiting",
 		Added: time.Now(), Files: []string{}, Details: []string{}, ETA: -1, cookieFile: cookieFile}
+	if cookieFile != "" && filepath.Dir(cookieFile) == q.cookieDir {
+		j.CookieName = filepath.Base(cookieFile)
+	}
 	if source == "protocol" {
 		j.Status, j.Stage = jobConfirm, "waiting for your OK"
 	}
@@ -230,6 +252,45 @@ func (q *queue) trimLocked() {
 
 func isFinished(s string) bool { return s == jobDone || s == jobFailed || s == jobCancelled }
 
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// removeOrphans deletes part folders of jobs that are gone or finished, and
+// cookie files no unfinished job uses. The extension's newest cookie files
+// may belong to a request that is still on its way (intake.go), so only
+// files older than a minute go.
+func (q *queue) removeOrphans() {
+	q.mu.Lock()
+	keepParts, keepCookies := map[string]bool{}, map[string]bool{}
+	for _, j := range q.jobs {
+		if !isFinished(j.Status) {
+			keepParts[j.ID] = true
+			if j.cookieFile != "" {
+				keepCookies[filepath.Base(j.cookieFile)] = true
+			}
+		}
+	}
+	q.mu.Unlock()
+	if entries, err := os.ReadDir(q.tempRoot); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && !keepParts[e.Name()] {
+				os.RemoveAll(filepath.Join(q.tempRoot, e.Name())) // ignore: tried again next start
+			}
+		}
+	}
+	if entries, err := os.ReadDir(q.cookieDir); err == nil {
+		for _, e := range entries {
+			info, err := e.Info()
+			if err != nil || keepCookies[e.Name()] || time.Since(info.ModTime()) < time.Minute {
+				continue
+			}
+			os.Remove(filepath.Join(q.cookieDir, e.Name())) // ignore: tried again next start
+		}
+	}
+}
+
 func (q *queue) notify(j Job) {
 	if q.onChange != nil {
 		q.onChange(j)
@@ -260,6 +321,21 @@ func (q *queue) Release() {
 	q.Schedule()
 }
 
+// Active is the number of downloads that run or wait to run. Paused jobs
+// and links that wait for the user's OK do not count: they would not end
+// by themselves.
+func (q *queue) Active() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, j := range q.jobs {
+		if j.Status == jobRunning || j.Status == jobWaiting {
+			n++
+		}
+	}
+	return n
+}
+
 // Running is the number of downloads in progress.
 func (q *queue) Running() int {
 	q.mu.Lock()
@@ -284,7 +360,12 @@ func (q *queue) Schedule() {
 		ctx, cancel := context.WithCancel(context.Background())
 		q.cancel[j.ID] = cancel
 		j.Status, j.Stage, j.Started, j.Error, j.Details = jobRunning, "starting yt-dlp", time.Now(), "", []string{}
-		j.Percent, j.Done, j.Total, j.Speed, j.ETA, j.Files = 0, 0, 0, 0, -1, []string{}
+		j.Speed, j.ETA, j.Files = 0, -1, []string{}
+		if j.Resumable {
+			j.Stage = "continuing" // the numbers stay until yt-dlp reports its own
+		} else {
+			j.Percent, j.Done, j.Total = 0, 0, 0
+		}
 		q.saveLocked()
 		c := copyJob(j)
 		q.wg.Add(1)
@@ -298,7 +379,11 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 	q.notify(j)
 	temp := filepath.Join(q.tempRoot, id)
 	var errLines []string
-	args := buildArgs(j.Options, j.URL, q.ts, q.have, jobPaths{Temp: temp, Cookies: q.cookieFileOf(id)}, j.Referer)
+	jp := jobPaths{Temp: temp, Cookies: q.cookieFileOf(id)}
+	if q.proxy != nil {
+		jp.Proxy = q.proxy()
+	}
+	args := buildArgs(j.Options, j.URL, q.ts, q.have, jp, j.Referer)
 	q.logger.Info("download started", "id", id, "host", hostOf(j.URL))
 
 	err := os.MkdirAll(temp, 0o700)
@@ -320,11 +405,48 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 		err = fileError(err, "create the folder for unfinished parts", temp)
 	}
 
-	// However it ended: the unfinished parts and a cookie file go.
-	if rerr := os.RemoveAll(temp); rerr != nil {
-		q.logger.Warn("cannot remove unfinished parts", "dir", temp, "err", rerr)
+	if err == nil && ctx.Err() == nil && j.Options.CleanNames {
+		q.tidyFiles(id)
+	}
+	// The parts stay for a later run when the job was paused or VideoCatcher
+	// ends; otherwise they go, however the job ended.
+	if !q.keepsParts(id, ctx) {
+		if rerr := os.RemoveAll(temp); rerr != nil {
+			q.logger.Warn("cannot remove unfinished parts", "dir", temp, "err", rerr)
+		}
 	}
 	q.finish(id, ctx, err, errLines)
+}
+
+func (q *queue) keepsParts(id string, ctx context.Context) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return ctx.Err() != nil && (q.closing || q.pausing[id])
+}
+
+// tidyFiles gives the downloaded files of a job their tidy names (names.go).
+// A file that cannot be renamed keeps yt-dlp's name; the download counts.
+func (q *queue) tidyFiles(id string) {
+	q.mu.Lock()
+	j := q.findLocked(id)
+	if j == nil {
+		q.mu.Unlock()
+		return
+	}
+	files := append([]string{}, j.Files...)
+	q.mu.Unlock()
+	for i, f := range files {
+		n, err := tidyFile(f)
+		if err != nil {
+			q.logger.Warn("file keeps its name", "id", id, "err", err)
+		}
+		files[i] = n
+	}
+	q.mu.Lock()
+	if j := q.findLocked(id); j != nil {
+		j.Files = files
+	}
+	q.mu.Unlock()
 }
 
 func (q *queue) cookieFileOf(id string) string {
@@ -416,16 +538,28 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		q.Schedule()
 		return
 	}
-	if j.cookieFile != "" {
-		if rerr := os.Remove(j.cookieFile); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-			q.logger.Warn("cannot remove a cookie file", "err", rerr)
-		}
-		j.cookieFile = ""
-	}
+	paused := q.pausing[id]
+	delete(q.pausing, id)
 	j.Ended, j.Speed, j.ETA = time.Now(), 0, -1
+	if ctx.Err() != nil && (q.closing || paused) {
+		// Parts and cookies stay for the next run.
+		j.Resumable = true
+		if q.closing {
+			j.Status, j.Stage = jobWaiting, "interrupted, continues"
+		} else {
+			j.Status, j.Stage = jobPaused, "paused"
+			q.logger.Info("download paused", "id", id)
+		}
+		q.saveLocked()
+		c := copyJob(j)
+		q.mu.Unlock()
+		q.notify(c)
+		q.Schedule()
+		return
+	}
+	q.dropCookiesLocked(j)
+	j.Resumable = false
 	switch {
-	case ctx.Err() != nil && q.closing:
-		j.Status, j.Stage = jobWaiting, "interrupted, starts again"
 	case ctx.Err() != nil:
 		j.Status, j.Stage = jobCancelled, "stopped"
 		q.logger.Info("download stopped", "id", id)
@@ -451,6 +585,93 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 	q.Schedule()
 }
 
+// dropCookiesLocked deletes the cookie file of a job; q.mu is held.
+func (q *queue) dropCookiesLocked(j *Job) {
+	if j.cookieFile != "" {
+		if rerr := os.Remove(j.cookieFile); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			q.logger.Warn("cannot remove a cookie file", "err", rerr)
+		}
+		j.cookieFile = ""
+	}
+	j.CookieName = ""
+}
+
+// dropPartsLocked deletes the kept parts of a job that will not continue;
+// q.mu is held, the job does not run.
+func (q *queue) dropPartsLocked(j *Job) {
+	if err := os.RemoveAll(filepath.Join(q.tempRoot, j.ID)); err != nil {
+		q.logger.Warn("cannot remove unfinished parts", "id", j.ID, "err", err)
+	}
+	j.Resumable = false
+}
+
+// Pause stops a running job and keeps its parts, or holds a waiting one.
+// "Continue" (Resume) goes on where it stopped.
+func (q *queue) Pause(id string) error {
+	q.mu.Lock()
+	j := q.findLocked(id)
+	if j == nil {
+		q.mu.Unlock()
+		return userError(errors.New("unknown job "+id), "This download is no longer in the list", "")
+	}
+	if cancel, ok := q.cancel[id]; ok {
+		q.pausing[id] = true
+		q.mu.Unlock()
+		cancel() // run() ends and calls finish, which sees pausing
+		return nil
+	}
+	changed := j.Status == jobWaiting
+	if changed {
+		j.Status, j.Stage = jobPaused, "paused"
+		q.saveLocked()
+	}
+	c := copyJob(j)
+	q.mu.Unlock()
+	if changed {
+		q.notify(c)
+	}
+	return nil
+}
+
+// Resume lets a paused job wait for its turn again.
+func (q *queue) Resume(id string) error {
+	return q.setStatus(id, func(j *Job) bool {
+		if j.Status != jobPaused {
+			return false
+		}
+		j.Status, j.Stage = jobWaiting, "waiting"
+		return true
+	})
+}
+
+// PauseAll pauses every running and waiting job; ResumeAll lets every
+// paused one go on.
+func (q *queue) PauseAll() {
+	for _, id := range q.idsWith(jobRunning, jobWaiting) {
+		q.Pause(id) // ignore: a job that ended in between needs no pause
+	}
+}
+
+func (q *queue) ResumeAll() {
+	for _, id := range q.idsWith(jobPaused) {
+		q.Resume(id) // ignore: a job removed in between needs nothing
+	}
+}
+
+func (q *queue) idsWith(states ...string) []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var ids []string
+	for _, j := range q.jobs {
+		for _, s := range states {
+			if j.Status == s {
+				ids = append(ids, j.ID)
+			}
+		}
+	}
+	return ids
+}
+
 // Cancel stops a running job or takes a waiting one out of the line.
 func (q *queue) Cancel(id string) error {
 	q.mu.Lock()
@@ -464,8 +685,10 @@ func (q *queue) Cancel(id string) error {
 		cancel() // run() ends and calls finish
 		return nil
 	}
-	if j.Status == jobWaiting || j.Status == jobConfirm {
+	if j.Status == jobWaiting || j.Status == jobConfirm || j.Status == jobPaused {
 		j.Status, j.Stage = jobCancelled, "stopped"
+		q.dropPartsLocked(j)
+		q.dropCookiesLocked(j)
 		q.saveLocked()
 	}
 	c := copyJob(j)
@@ -480,7 +703,8 @@ func (q *queue) Retry(id string) error {
 		if !isFinished(j.Status) {
 			return false
 		}
-		j.Status, j.Stage, j.Error, j.Percent = jobWaiting, "waiting", "", 0
+		j.Status, j.Stage, j.Error, j.Percent, j.Done, j.Total = jobWaiting, "waiting", "", 0, 0, 0
+		q.dropPartsLocked(j) // a new try starts clean
 		return true
 	})
 }
@@ -529,8 +753,9 @@ func (q *queue) Remove(ids ...string) {
 	keep := q.jobs[:0]
 	for _, j := range q.jobs {
 		if drop[j.ID] {
-			if j.cookieFile != "" {
-				os.Remove(j.cookieFile) // ignore: best effort, the file has no use any more
+			q.dropCookiesLocked(j)
+			if !isFinished(j.Status) {
+				q.dropPartsLocked(j)
 			}
 			continue
 		}
@@ -555,7 +780,8 @@ func (q *queue) FinishedIDs() []string {
 }
 
 // Close stops every running download and waits for them to end. They are
-// kept as waiting and start again with the next start of VideoCatcher.
+// kept as waiting with their parts and continue with the next start of
+// VideoCatcher.
 func (q *queue) Close() {
 	q.mu.Lock()
 	q.closing, q.hold = true, true

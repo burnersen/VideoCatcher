@@ -48,6 +48,10 @@ body {
   margin: 0;
   display: grid;
   grid-template-rows: auto auto 1fr auto auto;
+  /* minmax(0, ...) everywhere: a plain 1fr column is never narrower than its
+     longest word, and a long link is one word. It made the window as wide as
+     the link, with the buttons far off to the right (0.2.0). */
+  grid-template-columns: minmax(0, 1fr);
   font: 14px/1.45 var(--text);
   background: var(--bg);
   color: var(--ink);
@@ -125,7 +129,7 @@ input[readonly] { color: var(--muted); }
 /* --- two columns: catch on the left, downloads on the right --- */
 .layout {
   display: grid;
-  grid-template-columns: minmax(400px, 470px) 1fr;
+  grid-template-columns: minmax(400px, 470px) minmax(0, 1fr);
   min-height: 0;
 }
 .catch {
@@ -188,7 +192,7 @@ input[readonly] { color: var(--muted); }
 .job-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
 .job {
   display: grid;
-  grid-template-columns: 92px 1fr auto; /* room for "100%" */
+  grid-template-columns: 92px minmax(0, 1fr) auto; /* room for "100%" */
   gap: 2px 14px;
   padding: 12px 0 13px;
   border-bottom: 1px solid var(--line);
@@ -205,7 +209,7 @@ input[readonly] { color: var(--muted); }
 .job.done .pct { color: var(--ok); }
 .job.failed .pct, .job.cancelled .pct { color: var(--muted); font-size: 22px; }
 .job .title { grid-column: 2; grid-row: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.job .meta { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); }
+.job .meta { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 .job .meta .num { font-family: var(--num); font-variant-numeric: tabular-nums; }
 /* Every part has its place: with only a row, the grid put the buttons next
    to the number and pushed the title to the right edge (0.1.0). */
@@ -216,20 +220,47 @@ input[readonly] { color: var(--muted); }
 .fill { display: block; height: 100%; width: 0; background: var(--signal); transition: width 0.25s linear; }
 .job.done .fill { background: var(--ok); }
 .job.failed .fill, .job.cancelled .fill { background: var(--muted); }
-.job .error-text { grid-column: 2 / -1; margin-top: 6px; color: var(--bad); font-size: 13px; }
+.job .error-text { grid-column: 2 / -1; margin-top: 6px; color: var(--bad); font-size: 13px; overflow-wrap: anywhere; }
 .job .error-text b { display: block; }
-.job .confirm-text { grid-column: 2 / -1; margin-top: 6px; font-size: 13px; }
+.job .confirm-text { grid-column: 2 / -1; margin-top: 6px; font-size: 13px; overflow-wrap: anywhere; }
 .job.confirm { background: linear-gradient(90deg, rgba(242, 183, 5, 0.16), transparent 70%); }
 .job details { grid-column: 2 / -1; margin-top: 4px; font-size: 12px; color: var(--muted); }
 .job details pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; font: 12px/1.4 Consolas, monospace; }
+.job.paused .pct { color: var(--muted); }
+.job.paused .fill { background: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+
+/* the row under the head: pause all, speed slider, when all are done */
+.jobs-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; font-size: 13px; }
+.jobs-tools .spacer { flex: 1; }
+.jobs-tools select { padding: 3px 6px; font-size: 13px; }
+.speed { display: flex; align-items: center; gap: 8px; margin-left: 8px; }
+.speed input[type="range"] { width: 140px; accent-color: var(--signal); }
+.num { font-family: var(--num); font-variant-numeric: tabular-nums; }
+#speed-pct { min-width: 3.2em; }
+.after-waiting { text-align: right; margin: -4px 0 8px; }
+.after-banner {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 10px; padding: 8px 12px; border-radius: 6px;
+  background: var(--signal); color: var(--signal-ink); font-weight: 600;
+}
+.after-banner span { flex: 1; }
+
+/* links dragged over the window */
+.drop-zone {
+  position: fixed; inset: 10px; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  border: 3px dashed var(--signal); border-radius: 12px;
+  background: rgba(15, 76, 92, 0.82); color: var(--petrol-ink);
+  font: 600 26px/1 var(--num); pointer-events: none;
+}
 
 /* --- activity log --- */
 .log { border-top: 1px solid var(--line); background: var(--surface); padding: 6px 20px; font-size: 12.5px; }
-.log summary { cursor: pointer; }
+.log summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-actions { margin: 4px 0; }
 .log-list { list-style: none; margin: 0; padding: 0; max-height: 150px; overflow-y: auto; }
-.log-list li { padding: 1px 0; }
+.log-list li { padding: 1px 0; overflow-wrap: anywhere; }
 .log-list .time { display: inline-block; min-width: 5.5em; font-family: var(--num); color: var(--muted); margin-right: 8px; }
 .log-list .lvl-warn { color: #a76c00; }
 .log-list .lvl-error { color: var(--bad); }
@@ -251,6 +282,6 @@ input[readonly] { color: var(--muted); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 @media (max-width: 980px) {
-  .layout { grid-template-columns: 1fr; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
   .catch { border-right: 0; border-bottom: 1px solid var(--line); }
 }

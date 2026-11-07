@@ -12,7 +12,8 @@ package main
 //     on, the log gets the technical cause
 //   - nothing here blocks for long; long work runs in a goroutine and
 //     reports with events: "tools" (the tools panel), "job" (one download
-//     changed), "log" (a line for the activity log)
+//     changed), "log" (a line for the activity log), "speed" (the speed
+//     slider and what flows), "afterall" (when all downloads are done)
 
 import (
 	"context"
@@ -21,8 +22,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -38,6 +41,13 @@ type App struct {
 	queue  *queue
 	run    runner
 	intake *intake
+	speed  *speedControl // nil until startup
+	after  *finishWatch
+	tray   *trayIcon // nil if the system has none
+
+	quitting  atomic.Bool // Quit was chosen: the close button must not keep the window
+	toldTray  atomic.Bool // the balloon "goes on here" was shown in this run
+	saveTimer *time.Timer // settings the program changes itself, saved a moment later
 
 	mu     sync.Mutex
 	cfg    config
@@ -76,13 +86,15 @@ func NewApp(paths appPaths, logger *slog.Logger) *App {
 	a.queue = newQueue(a.run, ts, a.tools.Ready, paths.DataDir, logger)
 	a.intake = newIntake(paths.DataDir, logger)
 	a.cfg = defaultConfig()
+	a.after = newFinishWatch(a.afterAllDone)
 	return a
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	defer close(a.ready)
-	a.queue.onChange = func(j Job) { a.emit("job", j) }
+	a.queue.onChange = a.jobChanged
+	a.after.onChange = a.afterAllChanged
 	a.tools.report = func(s []ToolStatus) {
 		a.emit("tools", s)
 		a.queue.Schedule() // a tool that became ready may let waiting jobs start
@@ -99,6 +111,14 @@ func (a *App) startup(ctx context.Context) {
 		for _, w := range res.Warnings {
 			a.uiLog("warn", w)
 		}
+	}
+	a.speed = newSpeedControl(a.cfg.SpeedPercent, float64(a.cfg.MeasuredSpeed), a.logger)
+	a.queue.proxy = a.speed.ProxyURL
+	go a.measureSpeed(ctx)
+	if t, err := newTray(a.showWindow, a.quit); err != nil {
+		a.logger.Warn("no tray icon, the close button quits", "err", err)
+	} else {
+		a.tray = t
 	}
 	if err := a.queue.load(); err != nil {
 		a.logError(err)
@@ -129,8 +149,157 @@ func (a *App) refreshNativeHost() {
 }
 
 func (a *App) shutdown(context.Context) {
-	a.queue.Close()
+	a.queue.Close() // running downloads keep their parts and continue at the next start
+	if a.speed != nil {
+		a.speed.Close()
+	}
+	if a.tray != nil {
+		a.tray.Close()
+	}
+	a.mu.Lock()
+	if a.saveTimer != nil && a.saveTimer.Stop() {
+		a.mu.Unlock()
+		a.saveNow() // a change from the last seconds must not get lost
+	} else {
+		a.mu.Unlock()
+	}
 	a.logger.Info("done")
+}
+
+// beforeClose decides what the close button does (setting closeButton):
+// with downloads running, or always, the window goes into the notification
+// area and the downloads go on. Quit from the tray menu really ends.
+func (a *App) beforeClose(ctx context.Context) (prevent bool) {
+	if a.quitting.Load() || a.tray == nil {
+		return false
+	}
+	a.mu.Lock()
+	mode := a.cfg.CloseAction
+	a.mu.Unlock()
+	if mode == "quit" || (mode == "tray-if-running" && a.queue.Active() == 0) {
+		return false
+	}
+	if err := a.tray.Show(a.trayTip(), !a.toldTray.Load()); err != nil {
+		a.logger.Warn("tray icon not shown, quitting instead", "err", err)
+		return false
+	}
+	a.toldTray.Store(true)
+	wailsruntime.WindowHide(ctx)
+	a.logger.Info("window in the tray")
+	return true
+}
+
+// showWindow brings the window back from the tray (or the taskbar).
+func (a *App) showWindow() {
+	if a.ctx == nil {
+		return
+	}
+	wailsruntime.WindowShow(a.ctx)
+	wailsruntime.WindowUnminimise(a.ctx)
+	if a.tray != nil {
+		a.tray.Hide()
+	}
+}
+
+// quit ends VideoCatcher, also when the close button would keep it.
+func (a *App) quit() {
+	a.quitting.Store(true)
+	if a.ctx != nil {
+		wailsruntime.Quit(a.ctx)
+	}
+}
+
+func (a *App) trayTip() string {
+	if a.tray == nil {
+		return displayName
+	}
+	n := a.queue.Active()
+	if n == 0 {
+		return displayName
+	}
+	return strings.ReplaceAll(a.tray.Texts().Running, "{n}", fmt.Sprint(n))
+}
+
+// jobChanged: a download changed. The window gets it, the tray tooltip and
+// "when all are done" look at the numbers.
+func (a *App) jobChanged(j Job) {
+	a.emit("job", j)
+	a.after.Update(a.queue.Active())
+	if a.tray != nil && a.tray.Visible() {
+		a.tray.SetTip(a.trayTip())
+	}
+}
+
+// measureSpeed asks the relay once a second what flows and tells the
+// window; a new fastest speed is saved (it is 100 % of the slider).
+func (a *App) measureSpeed(ctx context.Context) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	var last SpeedState
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		st, rose := a.speed.Tick()
+		if rose {
+			a.mu.Lock()
+			a.cfg.MeasuredSpeed = int64(st.Peak)
+			a.mu.Unlock()
+			a.saveSoon()
+		}
+		if st != last {
+			a.emit("speed", st)
+			last = st
+		}
+	}
+}
+
+// saveSoon saves the settings the program changes itself (slider, measured
+// speed) a few seconds after the last change, not at every step.
+func (a *App) saveSoon() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.saveTimer != nil {
+		a.saveTimer.Stop()
+	}
+	a.saveTimer = time.AfterFunc(3*time.Second, a.saveNow)
+}
+
+func (a *App) saveNow() {
+	a.mu.Lock()
+	c := a.cfg
+	a.mu.Unlock()
+	if err := saveConfig(a.paths.ConfigFile, c); err != nil {
+		a.logger.Warn("settings not saved", "err", err)
+	}
+}
+
+func (a *App) afterAllChanged(st AfterAllState) {
+	a.emit("afterall", st)
+	if st.Seconds > 0 {
+		a.showWindow() // whoever is at the PC sees the countdown and can stop it
+	}
+}
+
+// afterAllDone carries out the choice after the countdown.
+func (a *App) afterAllDone(action string) {
+	a.logger.Info("all downloads done", "action", action)
+	var err error
+	switch action {
+	case "quit":
+		a.quit()
+	case "sleep":
+		err = suspendPC(false)
+	case "hibernate":
+		err = suspendPC(true)
+	case "shutdown":
+		err = shutdownPC()
+	}
+	if err != nil {
+		a.logError(userError(err, "Windows did not do it", "Do it yourself, or check whether this PC allows it (sleep and hibernate can be turned off)."))
+	}
 }
 
 // onSecondInstance: VideoCatcher was started again, for example with
@@ -221,6 +390,8 @@ type Choices struct {
 	Playlist     []string `json:"playlist"`
 	SponsorBlock []string `json:"sponsorBlock"`
 	Cookies      []string `json:"cookies"`
+	CloseButton  []string `json:"closeButton"`
+	AfterAll     []string `json:"afterAll"`
 }
 
 // Settings are the app settings as the settings dialog edits them.
@@ -231,19 +402,23 @@ type Settings struct {
 	CheckUpdates   bool            `json:"checkUpdates"`
 	Language       string          `json:"language"`
 	WatchClipboard bool            `json:"watchClipboard"`
+	CloseButton    string          `json:"closeButton"`
 }
 
 // Initial is everything the page needs to draw itself.
 type Initial struct {
-	Version    string       `json:"version"`
-	Settings   Settings     `json:"settings"`
-	DefaultDir string       `json:"defaultDir"`
-	Choices    Choices      `json:"choices"`
-	Tools      []ToolStatus `json:"tools"`
-	Jobs       []Job        `json:"jobs"`
-	Log        []logLine    `json:"log"`
-	LogFile    string       `json:"logFile"`
-	ConfigFile string       `json:"configFile"`
+	Version    string        `json:"version"`
+	Settings   Settings      `json:"settings"`
+	DefaultDir string        `json:"defaultDir"`
+	Choices    Choices       `json:"choices"`
+	Tools      []ToolStatus  `json:"tools"`
+	Jobs       []Job         `json:"jobs"`
+	Log        []logLine     `json:"log"`
+	LogFile    string        `json:"logFile"`
+	ConfigFile string        `json:"configFile"`
+	Speed      SpeedState    `json:"speed"`
+	AfterAll   AfterAllState `json:"afterAll"`
+	HasTray    bool          `json:"hasTray"`
 }
 
 func (a *App) Initial() Initial {
@@ -251,12 +426,18 @@ func (a *App) Initial() Initial {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := Settings{Defaults: a.cfg.Defaults, DownloadDir: a.cfg.DownloadDir, Parallel: a.cfg.Parallel,
-		CheckUpdates: a.cfg.CheckUpdates, Language: a.cfg.Language, WatchClipboard: a.cfg.WatchClipboard}
+		CheckUpdates: a.cfg.CheckUpdates, Language: a.cfg.Language, WatchClipboard: a.cfg.WatchClipboard,
+		CloseButton: a.cfg.CloseAction}
 	s.Defaults.OutputDir = a.downloadDirLocked()
+	afterAll := afterAllChoices
+	if goruntime.GOOS != "windows" {
+		afterAll = []string{"none", "quit"} // power.go is Windows only for now
+	}
 	return Initial{Version: version, Settings: s, DefaultDir: defaultDownloadDir(), Tools: a.tools.Statuses(),
 		Jobs: a.queue.List(), Log: append([]logLine{}, a.logBuf...), LogFile: a.paths.LogFile, ConfigFile: a.paths.ConfigFile,
 		Choices: Choices{qualityChoices, containerChoices, audioFormatChoices, audioQualityChoices,
-			subModeChoices, playlistChoices, sponsorChoices, cookieChoices}}
+			subModeChoices, playlistChoices, sponsorChoices, cookieChoices, closeChoices, afterAll},
+		Speed: a.speed.State(), AfterAll: a.after.State(), HasTray: a.tray != nil}
 }
 
 // downloadDirLocked is the folder downloads go to; a.mu is held.
@@ -358,7 +539,11 @@ func (a *App) Preview(probeID string, o DownloadOptions) (string, error) {
 	if err != nil || name == "" {
 		return "", a.uiError(explainYtDlp(errs, err))
 	}
-	return finalExtension(name, o), nil
+	name = finalExtension(name, o)
+	if o.CleanNames {
+		name = tidyPath(name) // the name the file gets after the download (names.go)
+	}
+	return name, nil
 }
 
 // Add puts a download into the list.
@@ -386,6 +571,10 @@ func (a *App) Clipboard() string {
 }
 
 func (a *App) Cancel(id string) error  { return a.uiErr(a.queue.Cancel(id)) }
+func (a *App) Pause(id string) error   { return a.uiErr(a.queue.Pause(id)) }
+func (a *App) Resume(id string) error  { return a.uiErr(a.queue.Resume(id)) }
+func (a *App) PauseAll()               { a.queue.PauseAll() }
+func (a *App) ResumeAll()              { a.queue.ResumeAll() }
 func (a *App) Retry(id string) error   { return a.uiErr(a.queue.Retry(id)) }
 func (a *App) Confirm(id string) error { return a.uiErr(a.queue.Confirm(id)) }
 func (a *App) Remove(id string)        { a.queue.Remove(id) }
@@ -447,8 +636,12 @@ func (a *App) ChooseFolder(current string) (string, error) {
 // SaveSettings stores the settings and uses them from now on.
 func (a *App) SaveSettings(s Settings) error {
 	c := config{Defaults: s.Defaults, DownloadDir: s.DownloadDir, Parallel: s.Parallel,
-		CheckUpdates: s.CheckUpdates, Language: s.Language, WatchClipboard: s.WatchClipboard}
+		CheckUpdates: s.CheckUpdates, Language: s.Language, WatchClipboard: s.WatchClipboard, CloseAction: s.CloseButton}
 	c.Defaults.OutputDir = ""
+	a.mu.Lock()
+	// The slider and the measured speed are not in the dialog; they stay.
+	c.SpeedPercent, c.MeasuredSpeed = a.cfg.SpeedPercent, a.cfg.MeasuredSpeed
+	a.mu.Unlock()
 	if err := saveConfig(a.paths.ConfigFile, c); err != nil {
 		return a.uiError(err)
 	}
@@ -462,6 +655,43 @@ func (a *App) SaveSettings(s Settings) error {
 	}
 	a.logger.Info("settings saved")
 	return nil
+}
+
+// SetSpeed moves the speed slider (1 to 100 %). It counts at once, also for
+// running downloads; the setting is saved a moment later.
+func (a *App) SetSpeed(percent int) SpeedState {
+	a.speed.SetPercent(percent)
+	st := a.speed.State()
+	a.mu.Lock()
+	a.cfg.SpeedPercent = st.Percent
+	a.mu.Unlock()
+	a.saveSoon()
+	return st
+}
+
+// SetAfterAll chooses what happens when all downloads are done.
+func (a *App) SetAfterAll(action string) (AfterAllState, error) {
+	if goruntime.GOOS != "windows" && action != "none" && action != "quit" {
+		return a.after.State(), a.uiError(userError(errors.New("after all: "+action), "This is not possible on this system yet", ""))
+	}
+	if err := a.after.Set(action, a.queue.Active()); err != nil {
+		return a.after.State(), a.uiError(err)
+	}
+	a.logger.Info("after all downloads", "action", action)
+	return a.after.State(), nil
+}
+
+// AbortAfterAll stops the countdown and the choice.
+func (a *App) AbortAfterAll() AfterAllState {
+	a.after.Abort()
+	return a.after.State()
+}
+
+// SetTrayTexts: the page tells the words for the tray, in its language.
+func (a *App) SetTrayTexts(t TrayTexts) {
+	if a.tray != nil {
+		a.tray.SetTexts(t)
+	}
 }
 
 // CheckUpdates looks for a new yt-dlp now. It refuses while downloads run:

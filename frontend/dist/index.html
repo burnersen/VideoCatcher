@@ -105,6 +105,7 @@
             <input id="template" type="text" spellcheck="false">
           </div>
           <p class="preview"><span data-i18n="opt.preview"></span> <span id="preview"></span></p>
+          <label class="check"><input id="clean-names" type="checkbox"> <span data-i18n="opt.cleanNames"></span></label>
         </div>
         <div class="opt wide" id="opt-own-name" hidden>
           <label for="own-name" data-i18n="opt.ownName"></label>
@@ -155,6 +156,22 @@
         <button id="open-folder" type="button" class="ghost small" data-i18n="jobs.openFolder"></button>
         <button id="clear-done" type="button" class="ghost small" data-i18n="jobs.clear"></button>
       </div>
+      <div class="jobs-tools">
+        <button id="pause-all" type="button" class="ghost small" data-i18n="jobs.pauseAll"></button>
+        <button id="resume-all" type="button" class="ghost small" data-i18n="jobs.resumeAll"></button>
+        <label class="speed" for="speed"><span data-i18n="speed.label"></span>
+          <input id="speed" type="range" min="1" max="100" step="1">
+          <span id="speed-pct" class="num"></span></label>
+        <span id="speed-info" class="muted num"></span>
+        <span class="spacer"></span>
+        <label for="after-all" class="muted" data-i18n="after.label"></label>
+        <select id="after-all"></select>
+      </div>
+      <p id="after-waiting" class="hint-small after-waiting" data-i18n="after.waiting" hidden></p>
+      <section id="after-banner" class="after-banner" role="alert" hidden>
+        <span id="after-text"></span>
+        <button id="after-abort" type="button" class="small" data-i18n="after.abort"></button>
+      </section>
       <p id="jobs-empty" class="muted" data-i18n="jobs.empty"></p>
       <ol id="jobs" class="job-list"></ol>
     </section>
@@ -183,6 +200,10 @@
         <button id="set-choose-folder" type="button" class="ghost" data-i18n="opt.choose"></button>
       </div>
     </div>
+    <div class="opt" id="opt-close-button">
+      <label for="set-close-button" data-i18n="set.closeButton"></label>
+      <select id="set-close-button"></select>
+    </div>
     <label class="check"><input id="set-check-updates" type="checkbox"> <span data-i18n="set.checkUpdates"></span></label>
     <label class="check"><input id="set-watch-clipboard" type="checkbox"> <span data-i18n="set.watchClipboard"></span></label>
     <label class="check"><input id="set-browser-links" type="checkbox"> <span data-i18n="set.browserLinks"></span></label>
@@ -199,6 +220,8 @@
       <button id="set-save" type="button" class="primary" data-i18n="set.save"></button>
     </div>
   </dialog>
+
+  <div id="drop-zone" class="drop-zone" hidden><span data-i18n="drop.here"></span></div>
 
   <footer class="foot">Video-Catcher <span id="version"></span></footer>
   <script src="i18n.js"></script>

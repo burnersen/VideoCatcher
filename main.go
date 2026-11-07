@@ -20,6 +20,11 @@
 //	progress.go  reading yt-dlp's output
 //	ytdlp_errors.go  yt-dlp's errors in plain words
 //	proc*.go     starting yt-dlp (no console window, job object)
+//	speed.go     the speed slider: a local relay that limits all downloads
+//	names.go     tidy file names (letters and digits, dots between)
+//	afterall.go  when all downloads are done: quit, sleep, shut down
+//	power_*.go   sleep, hibernate, shut down
+//	tray_*.go    the icon in the notification area
 //	toolbox.go   yt-dlp, FFmpeg, Deno: status and preparation
 //	tools.go     pinned FFmpeg and Deno (runtime.json), tools.json
 //	ytdlp.go     newest yt-dlp, checked with its signed checksum list
@@ -89,6 +94,7 @@ func main() {
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
+		OnBeforeClose:    app.beforeClose,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId:               singleInstanceID,
 			OnSecondInstanceLaunch: app.onSecondInstance,

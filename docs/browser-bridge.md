@@ -44,8 +44,10 @@ The helper is `VideoCatcher.exe` itself, started by the browser without a
 window (`nativehost.go`). The browser starts it only for the extension named
 in the helper's manifest (Chrome and Edge: ID `lmloindgceipinokjbodjgcbfmihmlhd`,
 fixed by the `key` in the extension's manifest; Firefox:
-`videocatcher@burnersen.de`); there is no open network port that a web page
-could reach.
+`videocatcher@burnersen.de`); the extension needs no network port. (The only
+port Video-Catcher opens is the relay for the speed slider, on 127.0.0.1 and
+for yt-dlp only: it answers nothing without its password, which is new at
+every start. README, "What it does on the network".)
 
 "Allow the browser extension" in the settings writes the two manifests to
 `%LOCALAPPDATA%\VideoCatcher\native\` and points these keys at them, all

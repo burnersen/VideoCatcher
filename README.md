@@ -44,6 +44,12 @@
 - **See before you download:** title, length, every format with its size, subtitles in all languages, the entries of a playlist, and the exact file name it will get.
 - **The settings that matter, in plain words:** quality (best, 4K to 360p, audio only), file format, audio format and quality, subtitles (in the video, as a file, or both), playlists (all or only some entries), file name patterns or a name of your own for one video, cover picture, chapters, YouTube sponsor segments, speed limit.
 - **A real download manager:** a list with progress, speed and time left, several downloads at the same time, stop and try again, and the list survives a restart.
+- **Pause and continue:** pause a download (or all of them) and continue it later where it stopped, also after a restart. Closing Video-Catcher during a download pauses it; it goes on at the next start. Whether a half download can be continued depends on the site; if a link has expired, the download starts again from the beginning.
+- **Speed slider:** 1 to 100 % of your line, for all downloads together, and it works at once, also on downloads that are running. 100 % is the fastest speed Video-Catcher measured while there was no limit ([how it works](#-what-it-does-on-the-network)).
+- **Keeps running in the notification area:** with downloads running, the close button puts the window into the notification area and the downloads go on (setting **Close button of the window**). A click on the icon brings it back, its menu has **Quit**.
+- **When all are done:** quit Video-Catcher, put the PC to sleep, hibernate or shut it down, after a 60 second countdown you can cancel. It holds for this run only.
+- **Tidy file names:** letters and digits stay, everything else becomes a dot, never two in a row: `Holiday 2026 (Part #2) - Sea.mp4` becomes `Holiday.2026.Part.Nr2.Sea.mp4`. Letters of every script stay. Subtitles and cover pictures next to the video are renamed with it. On by default, one tick to turn it off.
+- **Drag and drop:** drag a link from the browser onto the window. One link is looked up, several are added straight away; `.txt` files with links and Internet shortcuts (`.url`) work too.
 - **yt-dlp stays up to date by itself,** and safely: a new yt-dlp is only used if its release is signed by the yt-dlp release key built into Video-Catcher.
 - **Errors in plain words:** "The site only shows this video to logged-in users" instead of a Python traceback, with what to do about it. What yt-dlp said is one click away.
 - **Straight from the browser:** the Video-Catcher extension for Firefox, Chrome and Edge sees which videos a page loads, also inside embedded players, and sends them with one click ([below](#-browser-extension)).
@@ -53,7 +59,7 @@
 ### What it never does
 
 - It never overwrites a file that is already in your download folder, and never writes outside the folder you chose.
-- It never leaves half downloads in your folder: unfinished parts live in Video-Catcher's own folder and are removed when a download ends, however it ends.
+- It never leaves half downloads in your folder: unfinished parts live in Video-Catcher's own folder. They are kept while a download is paused and removed when it ends, however it ends.
 - A link from a web page never starts a download by itself. It waits in the list until you click **Download**.
 - Your browser's logins (cookies) are never saved in the list, the log or a command line. A cookie file made for one download is deleted when that download ends.
 - No telemetry, no account, no advertising.
@@ -97,6 +103,10 @@ Everything can be set in the window (**Settings**, and "Use the current download
 | `checkUpdatesAtStart` | `true` | Look for a new yt-dlp at every start |
 | `language` | `auto` | `auto`, `en`, `de` |
 | `watchClipboard` | `false` | Offer links as soon as they are copied |
+| `tidyFileNames` | `true` | Rename downloaded files: letters and digits stay, everything else becomes one dot |
+| `closeButton` | `tray-if-running` | `quit` (running downloads pause and go on at the next start), `tray-if-running` (keep running in the notification area while downloads run), `tray` (always) |
+| `speedPercent` | `100` | The speed slider, 1 to 100; 100 means no limit |
+| `measuredSpeed` | `0` | 100 % of the slider in bytes per second, measured by Video-Catcher itself; set it to `0` to measure again |
 
 An invalid value is reported in the activity log, and its default is used instead.
 
@@ -109,7 +119,7 @@ An invalid value is reported in the activity log, and its default is used instea
 | Settings | `%APPDATA%\VideoCatcher\VideoCatcher.ini` |
 | yt-dlp, FFmpeg, Deno | `%LOCALAPPDATA%\VideoCatcher\bin\` |
 | Download list | `%LOCALAPPDATA%\VideoCatcher\queue.json` |
-| Unfinished parts | `%LOCALAPPDATA%\VideoCatcher\partial\` (removed when a download ends) |
+| Unfinished parts | `%LOCALAPPDATA%\VideoCatcher\partial\` (kept while a download is paused, removed when it ends) |
 | Log | `%LOCALAPPDATA%\VideoCatcher\logs\videocatcher.log` (the helper of the extension: `native-host.log` next to it) |
 | What the browsers know about the extension's helper | `%LOCALAPPDATA%\VideoCatcher\native\` and `HKEY_CURRENT_USER\Software\...\NativeMessagingHosts\de.burnersen.videocatcher` (Chrome, Chromium, Edge, Mozilla) |
 
@@ -121,6 +131,8 @@ An invalid value is reported in the activity log, and its default is used instea
 - GitHub, to find the newest yt-dlp and download it with its signed checksum list: at start (can be switched off) and when you click **Check for updates**.
 - GitHub, to download FFmpeg and Deno once, when they are missing. Both are pinned to one version by size and SHA-256 ([runtime.json](runtime.json)).
 - The preview pictures of the videos you look up, from the site itself.
+
+For the speed slider, yt-dlp sends its downloads through a small relay inside Video-Catcher, which passes on only as many bytes per second as the slider allows. The relay listens on `127.0.0.1` only (not reachable from other PCs), on a port Windows picks, with a password that is new at every start and that only yt-dlp gets; without it, it answers nothing. Encrypted (https) connections pass through it encrypted, and it adds nothing to the requests. A proxy set up in Windows itself is not used for downloads then: the relay connects to the sites directly.
 
 The browser extension itself makes no requests of its own; it only talks to Video-Catcher on this PC. Nothing else. Details in [CODE_SIGNING.md](CODE_SIGNING.md#privacy-policy).
 

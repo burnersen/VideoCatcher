@@ -14,6 +14,8 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -52,7 +54,15 @@ func TestLiveRealDownload(t *testing.T) {
 	}
 	t.Logf("probe: %q, %d formats, heights %v", info.Title, len(info.Formats), info.Heights)
 
+	// Through the speed relay, with a limit, as in the window: yt-dlp must
+	// download through it (https tunnel and plain http).
+	speed := newSpeedControl(50, 8<<20, logger) // 50 % of 8 MiB/s
+	defer speed.Close()
+	if speed.ProxyURL() == "" {
+		t.Fatal("speed relay did not start")
+	}
 	q := newQueue(execRunner{}, tb.ts, tb.Ready, data, logger)
+	q.proxy = speed.ProxyURL
 	defer q.Close()
 	o := defaultOptions()
 	o.OutputDir, o.Quality, o.Container = t.TempDir(), "360", "mp4"
@@ -72,6 +82,12 @@ func TestLiveRealDownload(t *testing.T) {
 				t.Fatalf("file %s: %v", got.Files[0], err)
 			}
 			t.Logf("downloaded %s, %d bytes", got.Files[0], st.Size())
+			if through := speed.meter.total.Load(); through < st.Size()/2 {
+				t.Fatalf("only %d bytes went through the relay", through)
+			}
+			if name := filepath.Base(got.Files[0]); strings.ContainsAny(name, " []()") {
+				t.Fatalf("file name not tidied: %s", name)
+			}
 			return
 		}
 		if time.Now().After(deadline) {

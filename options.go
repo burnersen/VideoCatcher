@@ -42,6 +42,7 @@ type DownloadOptions struct {
 	Fragments      int    `json:"fragments"`      // parallel fragments for HLS/DASH, 1 to 16
 	Cookies        string `json:"cookies"`        // none, or the browser to take cookies from
 	FileName       string `json:"fileName"`       // a name for this one download, without extension; empty means Template
+	CleanNames     bool   `json:"cleanNames"`     // rename the files afterwards: letters and digits, dots between (names.go)
 }
 
 // Lists of what the window may send. The window builds its menus from the
@@ -79,6 +80,7 @@ func defaultOptions() DownloadOptions {
 		Quality: "best", Container: "auto", AudioFormat: "best", AudioQuality: "best",
 		SubMode: "none", SubLangs: "de,en", Template: "%(title)s [%(id)s].%(ext)s", Playlist: "single",
 		EmbedMetadata: true, EmbedChapters: true, SponsorBlock: "off", Fragments: 4, Cookies: "none",
+		CleanNames: true,
 	}
 }
 
@@ -274,10 +276,11 @@ func checkURL(raw string) (string, error) {
 	return u.String(), nil
 }
 
-// jobPaths are the places of one download.
+// jobPaths are the places of one download and the way out to the net.
 type jobPaths struct {
-	Temp    string // unfinished parts; removed when the job ends
+	Temp    string // unfinished parts; removed when the job ends, kept while it is paused
 	Cookies string // a cookie file for this job, or empty
+	Proxy   string // VideoCatcher's own relay for the speed limit (speed.go), or empty
 }
 
 // buildArgs turns the options into yt-dlp's argument list. The link comes
@@ -388,6 +391,9 @@ func buildArgs(o DownloadOptions, link string, ts toolSet, have func(tool string
 	}
 	if referer != "" {
 		a = append(a, "--add-headers", "Referer:"+referer)
+	}
+	if jp.Proxy != "" {
+		a = append(a, "--proxy", jp.Proxy)
 	}
 	return append(a, "--", link)
 }

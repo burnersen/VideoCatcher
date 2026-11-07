@@ -50,6 +50,27 @@ function hostOf(link) {
   return m ? m[1].replace(/^www\./, "") : "";
 }
 
+// clipLong shortens every very long word (in practice: a link) to its
+// start and end, so a 900-character link fits in a line of the list or the
+// log. The full link stays in the row's tooltip.
+function clipLong(text) {
+  return String(text === undefined || text === null ? "" : text)
+    .replace(/\S{120,}/g, (w) => w.slice(0, 70) + "\u2026" + w.slice(-35));
+}
+
+// linksIn finds the web links in dropped text (a link, a list of links, a
+// .txt file, an Internet shortcut "URL=..."). Each link once, in order.
+const maxDroppedLinks = 200;
+function linksIn(text) {
+  const seen = new Set();
+  for (const m of String(text || "").matchAll(/https?:\/\/[^\s"'<>]+/gi)) {
+    const link = m[0].replace(/[),.;]+$/, "");
+    if (!seen.has(link)) seen.add(link);
+    if (seen.size >= maxDroppedLinks) break;
+  }
+  return [...seen];
+}
+
 // Only https pictures are shown; anything else stays empty.
 function safeImage(link) {
   return /^https:\/\/[^\s"'<>]+$/i.test(String(link || "")) ? link : "";
@@ -92,6 +113,12 @@ const ui = {
   autoName: "", // the name the pattern gives the looked-up video
   ownNameEdited: false, // the user typed a name of their own
   jobShapes: new Map(), // id -> what a row looks like apart from the numbers (see upsertJob)
+  speed: null, // SpeedState from Go
+  speedDragging: false, // the slider is being moved: Go's numbers must not jump it back
+  speedTimer: null,
+  afterAll: null, // AfterAllState from Go
+  afterLeft: 0, // seconds of the countdown shown
+  afterRun: 0, // number of the running countdown; a new state stops the old one
 
   backend() {
     return (window.go && window.go.main && window.go.main.App) || null;
@@ -142,6 +169,8 @@ const ui = {
     this.el("template-preset").innerHTML = presets.map((p) => `<option value="${esc(p.value)}">${esc(t(p.key))}</option>`).join("") +
       `<option value="">${esc(t("fn.custom"))}</option>`;
     this.fillSelect("set-language", ["auto", "en", "de"], (v) => (v === "auto" ? t("set.lang.auto") : v === "de" ? "Deutsch" : "English"));
+    this.fillSelect("set-close-button", c.closeButton || [], (v) => t("set.close." + v));
+    this.fillSelect("after-all", c.afterAll || ["none"], (v) => t("after." + v));
   },
 
   // fillQuality marks the heights the looked-up video really has.
@@ -163,6 +192,7 @@ const ui = {
     v("folder", o.outputDir); v("template", o.template); v("sponsor", o.sponsorBlock);
     v("cookies", o.cookies); v("rate", o.rateLimit || ""); v("fragments", o.fragments);
     c("embed-thumbnail", o.embedThumbnail); c("embed-metadata", o.embedMetadata); c("embed-chapters", o.embedChapters);
+    c("clean-names", o.cleanNames);
     this.syncPreset();
     this.updateVisibility();
   },
@@ -180,7 +210,7 @@ const ui = {
       embedMetadata: c("embed-metadata"), embedChapters: c("embed-chapters"),
       sponsorBlock: v("sponsor"), rateLimit: v("rate").trim(),
       fragments: Number(v("fragments")) || 1, cookies: v("cookies"),
-      fileName: this.ownName(),
+      fileName: this.ownName(), cleanNames: c("clean-names"),
     };
   },
 
@@ -390,6 +420,7 @@ const ui = {
 
   jobParts(j) {
     const pct = j.status === "failed" ? "!" : j.status === "cancelled" ? "x" : Math.floor(j.percent || 0) + "%";
+    // A paused job keeps its numbers: they say how far it got.
     const meta = [];
     const item = (text, cls) => meta.push(`<span${cls ? ` class="${cls}"` : ""}>${esc(text)}</span>`);
     // The stage comes from Go in English (queue.go, postStepLabel) and is
@@ -409,17 +440,18 @@ const ui = {
 
     const btn = (action, label, extra) => `<button type="button" class="ghost small" data-action="${action}" data-id="${esc(j.id)}"${extra || ""}>${esc(t(label))}</button>`;
     const actions = [];
-    if (j.status === "running" || j.status === "waiting") actions.push(btn("cancel", "job.stop"));
+    if (j.status === "running" || j.status === "waiting") actions.push(btn("pause", "job.pause"), btn("cancel", "job.stop"));
+    if (j.status === "paused") actions.push(btn("resume", "job.resume"), btn("cancel", "job.stop"));
     if (j.status === "confirm") actions.push(btn("confirm", "job.yes"), btn("cancel", "job.stop"));
     if (j.status === "failed" || j.status === "cancelled") actions.push(btn("retry", "job.retry"));
     if (j.status === "done" && (j.files || []).length > 0) actions.push(btn("show", "job.show", ' data-index="0"'));
     if (j.status !== "running") actions.push(btn("remove", "job.remove"));
 
     let below = "";
-    if (j.status === "confirm") below += `<p class="confirm-text">${esc(t("job.confirm"))} ${esc(j.url)}</p>`;
+    if (j.status === "confirm") below += `<p class="confirm-text">${esc(t("job.confirm"))} ${esc(clipLong(j.url))}</p>`;
     if (j.status === "failed" && j.error) {
       const [msg, ...hint] = String(j.error).split("\n");
-      below += `<p class="error-text"><b>${esc(msg)}</b>${esc(hint.join(" "))}</p>`;
+      below += `<p class="error-text"><b>${esc(clipLong(msg))}</b>${esc(clipLong(hint.join(" ")))}</p>`;
     }
     if ((j.details || []).length > 0 && (j.status === "failed" || j.status === "done")) {
       below += `<details><summary>${esc(t("job.details"))}</summary><pre>${esc(j.details.join("\n"))}</pre></details>`;
@@ -463,11 +495,13 @@ const ui = {
   renderCounts() {
     let r = 0;
     let w = 0;
+    let p = 0;
     for (const j of this.jobs.values()) {
       if (j.status === "running") r++;
       if (j.status === "waiting" || j.status === "confirm") w++;
+      if (j.status === "paused") p++;
     }
-    this.el("jobs-counts").textContent = r + w > 0 ? t("jobs.counts", { r, w }) : "";
+    this.el("jobs-counts").textContent = p > 0 ? t("jobs.countsPaused", { r, w, p }) : r + w > 0 ? t("jobs.counts", { r, w }) : "";
   },
 
   // upsertJob changes one row in place; a new job draws the whole list.
@@ -505,6 +539,8 @@ const ui = {
     try {
       switch (target.dataset.action) {
         case "cancel": await app.Cancel(id); break;
+        case "pause": await app.Pause(id); break;
+        case "resume": await app.Resume(id); break;
         case "retry": await app.Retry(id); break;
         case "confirm": await app.Confirm(id); break;
         case "show": await app.ShowFile(id, Number(target.dataset.index) || 0); break;
@@ -527,12 +563,162 @@ const ui = {
     this.renderJobs();
   },
 
+  // --- speed slider ---
+
+  // renderSpeed shows what Go measured. While the slider is moved, its own
+  // value counts, not the one Go sent a moment ago.
+  renderSpeed(st) {
+    if (!st) return;
+    this.speed = st;
+    const slider = this.el("speed");
+    if (!this.speedDragging) slider.value = st.percent;
+    slider.disabled = !st.active;
+    this.el("speed-pct").textContent = (this.speedDragging ? slider.value : st.percent) + " %";
+    const parts = [];
+    if (!st.active) {
+      parts.push(t("speed.off"));
+    } else {
+      if (st.rate > 0) parts.push(t("speed.now", { rate: formatSize(st.rate) }));
+      if (st.limit > 0) parts.push(t("speed.limit", { limit: formatSize(st.limit) }));
+      if (st.peak > 0) parts.push(t("speed.full", { peak: formatSize(st.peak) }));
+      else if (st.percent < 100) parts.push(t("speed.notMeasured"));
+    }
+    this.el("speed-info").textContent = parts.join(", ");
+  },
+
+  // moveSpeed: while the slider moves, Go hears about it a few times a
+  // second, so the downloads follow the hand.
+  moveSpeed(final) {
+    this.speedDragging = !final;
+    this.el("speed-pct").textContent = this.el("speed").value + " %";
+    if (final) {
+      clearTimeout(this.speedTimer);
+      this.speedTimer = null;
+      return this.sendSpeed();
+    } else if (!this.speedTimer) {
+      this.speedTimer = setTimeout(() => { this.speedTimer = null; return this.sendSpeed(); }, 150);
+    }
+    return null;
+  },
+
+  async sendSpeed() {
+    const app = this.backend();
+    if (!app || !app.SetSpeed) return;
+    try {
+      this.renderSpeed(await app.SetSpeed(Number(this.el("speed").value) || 100));
+    } catch (err) {
+      this.showError(err);
+    }
+  },
+
+  // --- when all downloads are done ---
+
+  renderAfterAll(st) {
+    if (!st) return;
+    this.afterAll = st;
+    this.el("after-all").value = st.action;
+    this.el("after-waiting").hidden = !st.waiting;
+    this.afterRun++;
+    this.afterLeft = st.seconds || 0;
+    this.tickAfterAll(this.afterRun);
+  },
+
+  tickAfterAll(run) {
+    if (run !== this.afterRun) return; // a newer state took over
+    const st = this.afterAll;
+    const counting = !!st && st.seconds > 0 && st.action !== "none";
+    this.el("after-banner").hidden = !counting;
+    if (!counting) return;
+    this.el("after-text").textContent = t("after.done") + " " + t("after.count." + st.action, { s: Math.max(0, this.afterLeft) });
+    if (this.afterLeft > 0) {
+      setTimeout(() => { this.afterLeft--; this.tickAfterAll(run); }, 1000);
+    }
+  },
+
+  async setAfterAll() {
+    const app = this.backend();
+    if (!app || !app.SetAfterAll) return;
+    try {
+      this.renderAfterAll(await app.SetAfterAll(this.el("after-all").value));
+    } catch (err) {
+      this.showError(err);
+      this.renderAfterAll(this.afterAll);
+    }
+  },
+
+  async abortAfterAll() {
+    const app = this.backend();
+    if (!app || !app.AbortAfterAll) return;
+    this.renderAfterAll(await app.AbortAfterAll());
+  },
+
+  // --- links dropped on the window ---
+
+  // One link goes into the field and is looked up, like a pasted one.
+  // Several are added straight away with the options in the form.
+  async onDrop(dt) {
+    if (!dt) return;
+    let text = [dt.getData ? dt.getData("text/uri-list") : "", dt.getData ? dt.getData("text/plain") : ""].join("\n");
+    for (const f of Array.from(dt.files || [])) {
+      if (/\.(txt|url)$/i.test(f.name || "") && f.size < 1 << 20 && f.text) text += "\n" + (await f.text());
+    }
+    const links = linksIn(text);
+    this.clearError();
+    if (links.length === 0) return this.showError(t("drop.none"));
+    if (links.length === 1) {
+      this.el("link").value = links[0];
+      return this.lookup();
+    }
+    const app = this.backend();
+    if (!app) return this.showError(t("err.noBackend"));
+    let n = 0;
+    for (const link of links) {
+      try {
+        this.upsertJob(await app.Add(link, Object.assign(this.options(), { fileName: "" }), ""));
+        n++;
+      } catch (err) {
+        this.showError(err);
+      }
+    }
+    this.el("add-status").textContent = t("drop.added", { n });
+  },
+
+  // wireDrop: the page takes every drop itself. Left to the web view, a
+  // dropped link or file would replace the whole window with that page.
+  wireDrop() {
+    let depth = 0;
+    const zone = this.el("drop-zone");
+    document.addEventListener("dragenter", (e) => { e.preventDefault(); depth++; zone.hidden = false; });
+    document.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    });
+    document.addEventListener("dragleave", () => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) zone.hidden = true;
+    });
+    document.addEventListener("drop", (e) => {
+      e.preventDefault();
+      depth = 0;
+      zone.hidden = true;
+      return this.onDrop(e.dataTransfer);
+    });
+  },
+
+  // sendTrayTexts gives Go the words for the tray icon, in the page's language.
+  sendTrayTexts() {
+    const app = this.backend();
+    if (!app || !app.SetTrayTexts) return;
+    app.SetTrayTexts({ open: t("tray.open"), quit: t("tray.quit"), running: t("tray.running"),
+      balloonTitle: t("tray.balloonTitle"), balloonText: t("tray.balloonText") }).catch(() => {}); // only words; the tray has English ones
+  },
+
   // --- activity log ---
 
   // A line with a key is shown in the page's language (and again in the
   // new one after a switch); the text is the English line from Go.
   logText(l) {
-    return l.key && l.key in globalThis.vcTexts.en ? t(l.key, l.vars) : l.text;
+    return clipLong(l.key && l.key in globalThis.vcTexts.en ? t(l.key, l.vars) : l.text);
   },
 
   log(entry) {
@@ -557,6 +743,8 @@ const ui = {
     this.el("set-folder").value = s.downloadDir || this.init.defaultDir;
     this.el("set-check-updates").checked = s.checkUpdates;
     this.el("set-watch-clipboard").checked = s.watchClipboard;
+    this.el("set-close-button").value = s.closeButton || "tray-if-running";
+    this.el("opt-close-button").hidden = !this.init.hasTray;
     this.el("set-use-current").checked = false;
     this.el("set-browser-links").checked = false;
     this.el("set-browser-ext").checked = false;
@@ -582,6 +770,7 @@ const ui = {
       checkUpdates: this.el("set-check-updates").checked,
       language: this.el("set-language").value,
       watchClipboard: this.el("set-watch-clipboard").checked,
+      closeButton: this.el("set-close-button").value || s.closeButton,
     };
     next.defaults = Object.assign({}, next.defaults, { formatId: "", playlistItems: "", fileName: "" });
     try {
@@ -614,6 +803,9 @@ const ui = {
     this.renderTools(this.tools);
     this.renderJobs();
     this.log(null);
+    this.renderSpeed(this.speed);
+    this.renderAfterAll(this.afterAll);
+    this.sendTrayTexts();
   },
 
   async checkUpdates() {
@@ -643,6 +835,14 @@ const ui = {
     on("template", "input", () => { this.syncPreset(); this.schedulePreview(); });
     on("own-name", "input", () => { this.ownNameEdited = true; this.schedulePreview(); });
     on("own-name-reset", "click", () => this.resetOwnName());
+    on("clean-names", "change", () => this.schedulePreview());
+    on("pause-all", "click", () => this.backend() && this.backend().PauseAll());
+    on("resume-all", "click", () => this.backend() && this.backend().ResumeAll());
+    on("speed", "input", () => this.moveSpeed(false));
+    on("speed", "change", () => this.moveSpeed(true));
+    on("after-all", "change", () => this.setAfterAll());
+    on("after-abort", "click", () => this.abortAfterAll());
+    this.wireDrop();
     for (const id of ["quality", "container", "audio-format", "sub-mode", "playlist"]) {
       on(id, "change", () => { this.updateVisibility(); this.schedulePreview(); });
     }
@@ -676,6 +876,8 @@ const ui = {
     rt.EventsOn("tools", (list) => this.renderTools(list));
     rt.EventsOn("job", (j) => this.upsertJob(j));
     rt.EventsOn("log", (l) => this.log(l));
+    rt.EventsOn("speed", (st) => this.renderSpeed(st));
+    rt.EventsOn("afterall", (st) => this.renderAfterAll(st));
     rt.EventsOn("clipboard", (link) => {
       this.el("clip-url").textContent = link;
       this.el("clip-banner").hidden = false;
@@ -701,6 +903,9 @@ const ui = {
       this.jobs = new Map((this.init.jobs || []).map((j) => [j.id, j]));
       this.renderJobs();
       for (const l of this.init.log || []) this.log(l);
+      this.renderSpeed(this.init.speed);
+      this.renderAfterAll(this.init.afterAll);
+      this.sendTrayTexts();
       this.el("version").textContent = this.init.version;
       this.listen();
       this.schedulePreview();
@@ -716,5 +921,7 @@ globalThis.kitFormatSize = formatSize;
 globalThis.vcEsc = esc;
 globalThis.vcFormatDuration = formatDuration;
 globalThis.vcBaseName = baseName;
+globalThis.vcClipLong = clipLong;
+globalThis.vcLinksIn = linksIn;
 
 document.addEventListener("DOMContentLoaded", () => ui.start());

@@ -29,6 +29,8 @@ on:
       - 'progress.go'
       - 'proc*.go'
       - 'queue.go'
+      - 'speed.go'
+      - 'names.go'
       - 'live_test.go'
       - '.github/workflows/live.yml'
 

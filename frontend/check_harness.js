@@ -63,7 +63,7 @@ function loadPage(backend, language) {
   const runTimers = async () => { while (timers.length) await timers.shift()(); };
   return {
     ui: context.kitUI, formatSize: context.kitFormatSize, esc: context.vcEsc, t: context.vcT,
-    texts: context.vcTexts, formatDuration: context.vcFormatDuration, baseName: context.vcBaseName,
+    texts: context.vcTexts, formatDuration: context.vcFormatDuration, baseName: context.vcBaseName, clipLong: context.vcClipLong, linksIn: context.vcLinksIn,
     elements, el: document.getElementById, docListeners, events, runTimers,
   };
 }

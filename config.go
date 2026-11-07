@@ -24,7 +24,16 @@ type config struct {
 	CheckUpdates   bool
 	Language       string // auto, en, de
 	WatchClipboard bool
+	CloseAction    string // closeChoices
+	SpeedPercent   int    // the speed slider, 1 to 100
+	MeasuredSpeed  int64  // bytes per second: 100 % of the slider (speed.go); 0 = not measured yet
 }
+
+// closeChoices: what the close button of the window does. quit ends
+// VideoCatcher (running downloads pause and continue at the next start);
+// tray-if-running keeps it in the notification area while downloads run;
+// tray always does.
+var closeChoices = []string{"quit", "tray-if-running", "tray"}
 
 // setting is one key of the INI file. This table is the only place a key is
 // described: defaults, the comments in a new file and the checks all come
@@ -136,7 +145,28 @@ var settings = []setting{
 		apply: choice([]string{"auto", "en", "de"}, func(c *config, v string) { c.Language = v }), get: func(c config) string { return c.Language }},
 	{key: "watchClipboard", def: "false", comment: "Offer a link as soon as one is copied (true or false).",
 		apply: boolSetting(func(c *config, v bool) { c.WatchClipboard = v }), get: func(c config) string { return onOff(c.WatchClipboard) }},
+	{key: "tidyFileNames", def: "true", comment: "Rename downloaded files: letters and digits stay, everything else becomes one dot (true or false).",
+		apply: boolSetting(func(c *config, v bool) { c.Defaults.CleanNames = v }), get: func(c config) string { return onOff(c.Defaults.CleanNames) }},
+	{key: "closeButton", def: "tray-if-running", comment: "The close button of the window: quit (downloads pause and go on at the next start), tray-if-running (keep running in the notification area while downloads run), tray (always keep running there).",
+		apply: choice(closeChoices, func(c *config, v string) { c.CloseAction = v }), get: func(c config) string { return c.CloseAction }},
+	{key: "speedPercent", def: "100", comment: "The speed slider: share of the fastest speed measured, 1 to 100. 100: no limit.",
+		apply: func(c *config, v string) (err error) {
+			c.SpeedPercent, err = parseIntRange(v, minSpeedPercent, maxSpeedPercent)
+			return err
+		}, get: func(c config) string { return strconv.Itoa(c.SpeedPercent) }},
+	{key: "measuredSpeed", def: "0", comment: "Fastest download speed measured without a limit, in bytes per second; 100 % of the speed slider. Measured by " + appName + " itself; 0: not yet. Set it to 0 to measure again.",
+		apply: func(c *config, v string) error {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 || n > maxMeasuredSpeed {
+				return fmt.Errorf("use a whole number from 0 to %d", maxMeasuredSpeed)
+			}
+			c.MeasuredSpeed = n
+			return nil
+		}, get: func(c config) string { return strconv.FormatInt(c.MeasuredSpeed, 10) }},
 }
+
+// maxMeasuredSpeed: 100 GB/s, far beyond any line; a bigger number is a typo.
+const maxMeasuredSpeed = 100 << 30
 
 // configLoad is what loadConfig found out. Created, Added and Warnings are
 // reported to the user by the caller (main.go, reportConfig).
