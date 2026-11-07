@@ -1,0 +1,35 @@
+# VideoCatcher (https://github.com/burnersen/VideoCatcher)
+# Copyright (C) 2026 burnersen
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Live test with the real programs on Windows (dev-starterkit 06 T5): the
+# newest yt-dlp through the real signature check, the pinned FFmpeg and
+# Deno, and one real download. By hand, and once a week, because yt-dlp and
+# the sites change without VideoCatcher changing.
+name: Live test
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Link to test with (empty: yt-dlp test video)'
+        required: false
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: live test
+        env:
+          VIDEOCATCHER_TEST_LIVE: '1'
+          VIDEOCATCHER_TEST_URL: ${{ inputs.url }}
+        run: go test -count=1 -run Live -v -timeout 30m ./...
