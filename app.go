@@ -16,15 +16,6 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// version is set by the release build with -ldflags "-X main.version=1.2.3".
-// Local builds say "dev". Never edit it by hand: the tag is the only source.
-var version = "dev"
-
-const (
-	appName = "VideoCatcher" // shown to users, file names on Windows
-	appID   = "videocatcher" // lower case: log file name
-)
-
 // App is everything the page may call. Wails turns every exported method
 // into a JavaScript function on window.go.main.App. Rules:
 //

@@ -1,0 +1,74 @@
+# VideoCatcher (https://github.com/burnersen/VideoCatcher)
+# Copyright (C) 2026 burnersen
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Copies the FFmpeg and Deno builds pinned in runtime.json into VideoCatcher's
+# own release "runtime-v1", so the first start keeps working when BtbN
+# removes old builds (dev-starterkit 08-sicherheit.md S4).
+#
+# Every run fetches each build from its original source and checks size and
+# SHA-256 against runtime.json. Only "Run workflow" by hand publishes; a pull
+# request that changes runtime.json or this file gets the same checks
+# without publishing.
+#
+# runtime-v1 is a pre-release that is never marked "latest", so
+# releases/latest/download/VideoCatcher.exe keeps pointing at VideoCatcher.
+name: Mirror runtime
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'runtime.json'
+      - '.github/workflows/mirror-runtime.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch the pinned builds and check them
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue' # the progress bar slows the download down a lot
+          $rt = Get-Content runtime.json -Raw | ConvertFrom-Json
+          $mirrorBase = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/runtime-v1/"
+          New-Item -ItemType Directory -Force mirror | Out-Null
+          foreach ($f in $rt.tools) {
+            $upstream = $f.urls | Where-Object { -not $_.StartsWith($mirrorBase) } | Select-Object -First 1
+            if (-not $upstream) { Write-Host "::error::$($f.file) has no original source"; exit 1 }
+            $out = Join-Path mirror $f.file
+            Invoke-WebRequest -Uri $upstream -OutFile $out
+            $size = (Get-Item $out).Length
+            $hash = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
+            if ($size -ne $f.size -or $hash -ne $f.sha256) {
+              Write-Host "::error::$($f.file): $size bytes, SHA-256 $hash; runtime.json pins $($f.size) bytes, $($f.sha256)"
+              exit 1
+            }
+            Write-Host "$($f.file): $size bytes, SHA-256 matches runtime.json."
+          }
+
+      - name: Publish to the release runtime-v1
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $rt = Get-Content runtime.json -Raw | ConvertFrom-Json
+          # FFmpeg is GPL: whoever passes on the binaries names their source.
+          $lines = foreach ($f in $rt.tools) {
+            "- **$($f.name)** ($($f.platform)), unchanged copy of ``$($f.file)``. License: $($f.license). Source: [code]($($f.source)), [build]($($f.build)). Size $($f.size) bytes, SHA-256 ``$($f.sha256)``."
+          }
+          $notes = "Programs VideoCatcher downloads when they are needed. Not a VideoCatcher release: get VideoCatcher from the latest release.`n`n" + ($lines -join "`n") + "`n`nVideoCatcher checks size and SHA-256 of every file before it unpacks anything."
+          [IO.File]::WriteAllText("$PWD/runtime-notes.md", $notes, [Text.UTF8Encoding]::new($false))
+          gh release view runtime-v1 *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create runtime-v1 --prerelease --latest=false --target $env:GITHUB_SHA --title 'Runtime files (FFmpeg, Deno)' --notes-file runtime-notes.md
+          } else {
+            gh release edit runtime-v1 --prerelease --latest=false --notes-file runtime-notes.md
+          }
+          gh release upload runtime-v1 (Get-ChildItem mirror).FullName --clobber

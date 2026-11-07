@@ -13,9 +13,9 @@ Gilt für jede KI, die hier arbeitet (`AGENTS.md` zeigt hierher). Diese Datei is
 | | |
 |---|---|
 | Zweck | A modern window and download manager for yt-dlp: catch videos from almost any site, by link or straight from the browser. |
-| Sichtbarkeit | öffentlich |
+| Sichtbarkeit | erst privat, später öffentlich (deshalb von Anfang an wie öffentlich gebaut) |
 | Sprache Kommentare, Commits, Meldungen | Englisch |
-| Plattformen | Windows x64 und ARM64 (Fenster mit Wails v2 und WebView2) |
+| Plattformen | Windows x64 und ARM64 (Fenster mit Wails v2 und WebView2); Linux später, Logik dafür schon plattformneutral |
 | Lizenz | GPL-3.0-only |
 
 ## Befehle
@@ -33,6 +33,10 @@ Release: Tag `v1.2.3` pushen, vorher `.github/release-notes/1.2.3.md` schreiben 
 ## Aufbau
 
 Siehe Kopfkommentar in `main.go`. Jede Methode in `app.go` gibt Fehler nur über `uiError` an die Seite (erste Zeile Meldung, zweite Zeile Hinweis), die technische Ursache geht ins Log. Ein Fehler beim Start zeigt ein Meldungsfenster (`showFatal`), nie `log.Fatal`. Die Seite liegt in `frontend/dist` (HTML, CSS, JS getrennt, kein npm), geprüft wird sie mit `frontend/*_check.js`. `logging.go`, `paths.go` und `files.go` sind dieselben wie in der Vorlage `go-cli`.
+
+## Bewusste Abweichungen vom Kit
+
+- **S4, yt-dlp ohne festgenagelte Prüfsumme** (`projekt-pruefen.sh` meldet es als WARNUNG): yt-dlp muss neu sein, sonst funktionieren die Seiten nicht mehr. Deshalb die neueste stabile Version, aber nur, wenn ihre Prüfsummenliste mit dem eingebauten yt-dlp-Schlüssel signiert ist (Fingerabdruck in `ytdlp.go`) und die Datei zur Liste passt. Ablauf und Tests: `ytdlp.go`, `pgp.go`, `tools_test.go`. FFmpeg und Deno sind wie üblich in `runtime.json` festgenagelt.
 
 ## Vor jedem Commit
 
