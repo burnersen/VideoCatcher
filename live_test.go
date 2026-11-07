@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -94,5 +95,94 @@ func TestLiveRealDownload(t *testing.T) {
 			t.Fatalf("still not done: %+v", got)
 		}
 		time.Sleep(time.Second)
+	}
+}
+
+// liveTestBig: a file large enough to pause in the middle at 1 MiB/s.
+const liveTestBig = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_5MB.mp4"
+
+// Pause in the middle, continue: yt-dlp must go on from the parts, not
+// start from zero (the point of 0.3.0's pause).
+func TestLivePauseContinues(t *testing.T) {
+	if os.Getenv("VIDEOCATCHER_TEST_LIVE") != "1" {
+		t.Skip("VIDEOCATCHER_TEST_LIVE not set")
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	data := t.TempDir()
+	rt, err := loadRuntime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb := newToolbox(newToolSet(data), newHTTPClient(), logger, rt)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	if err := tb.Prepare(ctx, true); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	speed := newSpeedControl(25, 4<<20, logger) // 1 MiB/s: the 5 MB file takes about five seconds
+	defer speed.Close()
+	q := newQueue(execRunner{}, tb.ts, tb.Ready, data, logger)
+	q.proxy = speed.ProxyURL
+	defer q.Close()
+
+	var mu sync.Mutex
+	resumed := false
+	var firstAfter float64 = -1
+	q.onChange = func(j Job) {
+		mu.Lock()
+		defer mu.Unlock()
+		if resumed && firstAfter < 0 && j.Status == jobRunning && j.Stage == "downloading" && j.Percent > 0 {
+			firstAfter = j.Percent
+		}
+	}
+	o := defaultOptions()
+	o.OutputDir = t.TempDir()
+	j, err := q.Add(liveTestBig, o, "window", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := func(what string, cond func(Job) bool) Job {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Minute)
+		for {
+			got := jobByID(q, j.ID)
+			if cond(got) {
+				return got
+			}
+			if isFinished(got.Status) || time.Now().After(deadline) {
+				t.Fatalf("waiting for %s: %+v", what, got)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	wait("30 %", func(g Job) bool { return g.Status == jobRunning && g.Percent >= 30 })
+	if err := q.Pause(j.ID); err != nil {
+		t.Fatal(err)
+	}
+	p := wait("paused", func(g Job) bool { return g.Status == jobPaused })
+	t.Logf("paused at %.0f %%", p.Percent)
+	mu.Lock()
+	resumed = true
+	mu.Unlock()
+	if err := q.Resume(j.ID); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Minute)
+	for jobByID(q, j.ID).Status != jobDone {
+		if g := jobByID(q, j.ID); g.Status == jobFailed || time.Now().After(deadline) {
+			t.Fatalf("after continue: %+v", g)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	mu.Lock()
+	first := firstAfter
+	mu.Unlock()
+	t.Logf("first progress after continue: %.0f %%", first)
+	if first < 20 {
+		t.Fatalf("continued at %.0f %%: the download started again from the beginning", first)
+	}
+	st, err := os.Stat(jobByID(q, j.ID).Files[0])
+	if err != nil || st.Size() < 4<<20 {
+		t.Fatalf("file: %v", err)
 	}
 }
