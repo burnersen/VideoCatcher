@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -388,7 +389,12 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 
 	err := os.MkdirAll(temp, 0o700)
 	if err == nil {
+		hide := secretOf(jp.Proxy)
 		err = q.r.Run(ctx, q.ts.YtDlp, args, func(_ bool, line string) {
+			if hide != "" {
+				// yt-dlp may name its proxy in an error; the password stays here.
+				line = strings.ReplaceAll(line, hide, "***")
+			}
 			l := parseLine(line)
 			switch l.Kind {
 			case lineError:
@@ -416,6 +422,16 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 		}
 	}
 	q.finish(id, ctx, err, errLines)
+}
+
+// secretOf is the password in a proxy URL, or "".
+func secretOf(proxy string) string {
+	u, err := url.Parse(proxy)
+	if err != nil || u.User == nil {
+		return ""
+	}
+	pw, _ := u.User.Password() // ignore: no password, nothing to hide
+	return pw
 }
 
 func (q *queue) keepsParts(id string, ctx context.Context) bool {

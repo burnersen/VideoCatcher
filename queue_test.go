@@ -491,3 +491,27 @@ func TestNamesStayWhenCleaningIsOff(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The relay's password never reaches the job's details or the log, also if
+// yt-dlp names its proxy in an error.
+func TestProxyPasswordIsHidden(t *testing.T) {
+	r := &fakeRunner{lines: func(args []string) []string {
+		for i, a := range args {
+			if a == "--proxy" {
+				return []string{"ERROR: Unable to connect to proxy " + args[i+1]}
+			}
+		}
+		return []string{"ERROR: no proxy given"}
+	}, err: errors.New("exit code 1")}
+	q, _ := newTestQueue(t, r)
+	q.proxy = func() string { return "http://vc:s3cretpass@127.0.0.1:5555" }
+	j, err := q.Add("https://example.org/v", testOptions(t), "window", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "failed", func() bool { return jobByID(q, j.ID).Status == jobFailed })
+	got := jobByID(q, j.ID)
+	if !strings.Contains(strings.Join(got.Details, ""), "vc:***@127.0.0.1") || strings.Contains(got.Error+strings.Join(got.Details, ""), "s3cretpass") {
+		t.Fatalf("%+v", got)
+	}
+}
