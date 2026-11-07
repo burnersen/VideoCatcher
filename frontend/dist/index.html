@@ -6,29 +6,192 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VideoCatcher</title>
+  <title>Video-Catcher</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
-    <h1>VideoCatcher</h1>
-    <p class="lead">Choose a file to see its size and SHA-256 checksum.</p>
+  <header class="bar">
+    <div class="brand">
+      <span class="wordmark">Video-Catcher</span>
+      <span class="tagline" data-i18n="app.tagline"></span>
+    </div>
+    <div id="tools" class="tools" aria-live="polite"></div>
+    <div class="bar-actions">
+      <button id="check-updates" type="button" class="ghost" data-i18n="tools.check"></button>
+      <button id="open-settings" type="button" class="ghost" data-i18n="settings.open"></button>
+    </div>
+  </header>
 
-    <button id="pick" type="button">Choose a file</button>
-    <span id="status" class="status" aria-live="polite"></span>
+  <section id="clip-banner" class="banner" hidden>
+    <span data-i18n="clip.found"></span> <span id="clip-url" class="clip-url"></span>
+    <button id="clip-use" type="button" class="small" data-i18n="clip.use"></button>
+    <button id="clip-dismiss" type="button" class="small ghost" aria-label="Close">×</button>
+  </section>
 
-    <section id="error" class="box error" role="alert" hidden>
-      <p id="error-msg" class="msg"></p>
-      <p id="error-hint" class="hint"></p>
+  <main class="layout">
+    <section class="catch" aria-labelledby="link-label">
+      <label id="link-label" for="link" class="field-label" data-i18n="link.label"></label>
+      <div class="link-row">
+        <input id="link" type="url" autocomplete="off" spellcheck="false" data-i18n-ph="link.placeholder">
+        <button id="paste" type="button" class="ghost" data-i18n="link.paste"></button>
+        <button id="lookup" type="button" data-i18n="link.lookup"></button>
+      </div>
+
+      <section id="error" class="notice error" role="alert" hidden>
+        <p id="error-msg" class="msg"></p>
+        <p id="error-hint" class="hint"></p>
+      </section>
+
+      <p id="info-empty" class="muted" data-i18n="link.empty"></p>
+      <article id="info" class="info" hidden>
+        <img id="info-thumb" class="thumb" alt="" hidden>
+        <div class="info-text">
+          <h2 id="info-title"></h2>
+          <p id="info-meta" class="muted"></p>
+          <p id="info-extra" class="muted"></p>
+        </div>
+        <details id="formats-box" class="formats">
+          <summary data-i18n="info.formats"></summary>
+          <div id="formats"></div>
+        </details>
+      </article>
+
+      <div class="options">
+        <div class="opt">
+          <label for="quality" data-i18n="opt.quality"></label>
+          <select id="quality"></select>
+        </div>
+        <div class="opt" id="opt-container">
+          <label for="container" data-i18n="opt.container"></label>
+          <select id="container"></select>
+        </div>
+        <div class="opt" id="opt-audio-format" hidden>
+          <label for="audio-format" data-i18n="opt.audioFormat"></label>
+          <select id="audio-format"></select>
+        </div>
+        <div class="opt" id="opt-audio-quality" hidden>
+          <label for="audio-quality" data-i18n="opt.audioQuality"></label>
+          <select id="audio-quality"></select>
+        </div>
+        <div class="opt">
+          <label for="sub-mode" data-i18n="opt.subtitles"></label>
+          <select id="sub-mode"></select>
+        </div>
+        <div class="opt" id="opt-sub-langs" hidden>
+          <label for="sub-langs" data-i18n="opt.subLangs"></label>
+          <input id="sub-langs" type="text" spellcheck="false">
+          <div id="sub-chips" class="chips"></div>
+          <label class="check"><input id="auto-subs" type="checkbox"> <span data-i18n="opt.autoSubs"></span></label>
+        </div>
+        <div class="opt">
+          <label for="playlist" data-i18n="opt.playlist"></label>
+          <select id="playlist"></select>
+        </div>
+        <div class="opt" id="opt-items" hidden>
+          <label for="items" data-i18n="opt.items"></label>
+          <input id="items" type="text" spellcheck="false" data-i18n-ph="opt.itemsHint">
+        </div>
+        <div class="opt wide">
+          <label for="folder" data-i18n="opt.folder"></label>
+          <div class="link-row">
+            <input id="folder" type="text" readonly>
+            <button id="choose-folder" type="button" class="ghost" data-i18n="opt.choose"></button>
+          </div>
+        </div>
+        <div class="opt wide">
+          <label for="template" data-i18n="opt.fileName"></label>
+          <div class="link-row">
+            <select id="template-preset"></select>
+            <input id="template" type="text" spellcheck="false">
+          </div>
+          <p class="preview"><span data-i18n="opt.preview"></span> <span id="preview"></span></p>
+        </div>
+        <details class="opt wide extras">
+          <summary data-i18n="opt.extras"></summary>
+          <label class="check"><input id="embed-thumbnail" type="checkbox"> <span data-i18n="opt.embedThumbnail"></span></label>
+          <label class="check"><input id="embed-metadata" type="checkbox"> <span data-i18n="opt.embedMetadata"></span></label>
+          <label class="check"><input id="embed-chapters" type="checkbox"> <span data-i18n="opt.embedChapters"></span></label>
+          <div class="extras-grid">
+            <div class="opt">
+              <label for="cookies" data-i18n="opt.cookies"></label>
+              <select id="cookies"></select>
+              <p class="hint-small" data-i18n="opt.cookiesHint"></p>
+            </div>
+            <div class="opt">
+              <label for="sponsor" data-i18n="opt.sponsorBlock"></label>
+              <select id="sponsor"></select>
+            </div>
+            <div class="opt">
+              <label for="rate" data-i18n="opt.rateLimit"></label>
+              <input id="rate" type="text" spellcheck="false" data-i18n-ph="opt.rateHint">
+            </div>
+            <div class="opt">
+              <label for="fragments" data-i18n="opt.fragments"></label>
+              <input id="fragments" type="number" min="1" max="16">
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="add-row">
+        <button id="add" type="button" class="primary" data-i18n="add"></button>
+        <span id="add-status" class="muted" aria-live="polite"></span>
+      </div>
     </section>
 
-    <section id="result" class="box" hidden>
-      <p><span class="label">File</span> <span id="result-path"></span></p>
-      <p><span class="label">Size</span> <span id="result-size"></span></p>
-      <p><span class="label">SHA-256</span> <code id="result-sha"></code></p>
+    <section class="jobs" aria-labelledby="jobs-title">
+      <div class="jobs-head">
+        <h2 id="jobs-title" data-i18n="jobs.title"></h2>
+        <span id="jobs-counts" class="muted"></span>
+        <span class="spacer"></span>
+        <button id="open-folder" type="button" class="ghost small" data-i18n="jobs.openFolder"></button>
+        <button id="clear-done" type="button" class="ghost small" data-i18n="jobs.clear"></button>
+      </div>
+      <p id="jobs-empty" class="muted" data-i18n="jobs.empty"></p>
+      <ol id="jobs" class="job-list"></ol>
     </section>
   </main>
-  <footer>VideoCatcher <span id="version"></span></footer>
+
+  <details id="log-box" class="log">
+    <summary><span data-i18n="log.title"></span> <span id="log-last" class="muted"></span></summary>
+    <div class="log-actions"><button id="open-log" type="button" class="ghost small" data-i18n="log.openLog"></button></div>
+    <ol id="log" class="log-list"></ol>
+  </details>
+
+  <dialog id="settings" class="settings">
+    <h2 data-i18n="set.title"></h2>
+    <div class="opt">
+      <label for="set-parallel" data-i18n="set.parallel"></label>
+      <input id="set-parallel" type="number" min="1" max="5">
+    </div>
+    <div class="opt">
+      <label for="set-language" data-i18n="set.language"></label>
+      <select id="set-language"></select>
+    </div>
+    <div class="opt">
+      <label for="set-folder" data-i18n="set.folder"></label>
+      <div class="link-row">
+        <input id="set-folder" type="text" readonly>
+        <button id="set-choose-folder" type="button" class="ghost" data-i18n="opt.choose"></button>
+      </div>
+    </div>
+    <label class="check"><input id="set-check-updates" type="checkbox"> <span data-i18n="set.checkUpdates"></span></label>
+    <label class="check"><input id="set-watch-clipboard" type="checkbox"> <span data-i18n="set.watchClipboard"></span></label>
+    <label class="check"><input id="set-browser-links" type="checkbox"> <span data-i18n="set.browserLinks"></span></label>
+    <p class="hint-small" data-i18n="set.browserLinksHint"></p>
+    <label class="check"><input id="set-use-current" type="checkbox"> <span data-i18n="set.useCurrent"></span></label>
+    <section id="set-error" class="notice error" role="alert" hidden>
+      <p id="set-error-msg" class="msg"></p>
+      <p id="set-error-hint" class="hint"></p>
+    </section>
+    <div class="dialog-actions">
+      <button id="set-cancel" type="button" class="ghost" data-i18n="set.cancel"></button>
+      <button id="set-save" type="button" class="primary" data-i18n="set.save"></button>
+    </div>
+  </dialog>
+
+  <footer class="foot">Video-Catcher <span id="version"></span></footer>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

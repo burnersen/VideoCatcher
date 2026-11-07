@@ -7,35 +7,16 @@ package main
 import (
 	"errors"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestCheckFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "a.txt")
-	if err := os.WriteFile(path, []byte("abc"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	res, err := checkFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Size != 3 || res.SHA256 != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
-		t.Fatalf("%+v", res)
-	}
-}
-
 // The page gets message and hint on two lines, never the technical cause.
 func TestUIErrorShowsMessageAndHint(t *testing.T) {
-	app := NewApp(appPaths{LogFile: "x.log"}, slog.New(slog.DiscardHandler))
-	_, err := app.CheckFile(filepath.Join(t.TempDir(), "missing.txt"))
-	if err == nil {
-		t.Fatal("no error for a missing file")
-	}
+	app := NewApp(appPaths{LogFile: "x.log", DataDir: t.TempDir()}, slog.New(slog.DiscardHandler))
+	err := app.uiError(fileError(errors.New("no such file or directory"), "open", `C:\x.txt`))
 	lines := strings.Split(err.Error(), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[0], "does not exist") || !strings.HasPrefix(lines[1], "Check") {
+	if len(lines) != 2 || !strings.Contains(lines[0], `C:\x.txt`) || !strings.HasPrefix(lines[1], "Try") {
 		t.Fatalf("text for the page: %q", err.Error())
 	}
 	if strings.Contains(err.Error(), "no such file") {
@@ -44,9 +25,22 @@ func TestUIErrorShowsMessageAndHint(t *testing.T) {
 }
 
 func TestUIErrorUnknownPointsToLog(t *testing.T) {
-	app := NewApp(appPaths{LogFile: `C:\logs\videocatcher.log`}, slog.New(slog.DiscardHandler))
+	app := NewApp(appPaths{LogFile: `C:\logs\videocatcher.log`, DataDir: t.TempDir()}, slog.New(slog.DiscardHandler))
 	err := app.uiError(errors.New("boom"))
 	if !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), `C:\logs\videocatcher.log`) {
 		t.Fatalf("%q", err.Error())
+	}
+}
+
+// Links that reach the app from outside take the defaults of the settings
+// and the folder; a link from a web page waits for the user.
+func TestAcceptUsesTheSettings(t *testing.T) {
+	app := NewApp(appPaths{LogFile: "x.log", DataDir: t.TempDir()}, slog.New(slog.DiscardHandler))
+	app.cfg.DownloadDir = t.TempDir()
+	app.cfg.Defaults.Quality = "720"
+	app.accept(intakeRequest{URL: "https://example.org/a", Source: "protocol"})
+	jobs := app.queue.List()
+	if len(jobs) != 1 || jobs[0].Status != jobConfirm || jobs[0].Options.Quality != "720" || jobs[0].Options.OutputDir != app.cfg.DownloadDir {
+		t.Fatalf("%+v", jobs)
 	}
 }

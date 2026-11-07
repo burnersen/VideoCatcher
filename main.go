@@ -4,13 +4,28 @@
 
 //go:build windows
 
-// VideoCatcher is a window for Windows. Replace this sentence with one that
-// says what it does; the structure stays.
+// VideoCatcher is a window and download manager for yt-dlp: paste a link or
+// send it from the browser, choose quality and subtitles, watch the queue.
 //
 // Where things are (template go-wails of dev-starterkit):
 //
 //	main.go      start of the window; a failed start shows a message box
 //	app.go       everything the page may call; small methods, one job each
+//	appinfo.go   name and version
+//	intake.go    links from outside: --add, videocatcher://, request files
+//	queue.go     the download manager: jobs, parallel runs, queue.json
+//	options.go   the settings of a download and yt-dlp's argument list
+//	probe.go     what is behind a link (yt-dlp -J), file name preview
+//	progress.go  reading yt-dlp's output
+//	ytdlp_errors.go  yt-dlp's errors in plain words
+//	proc*.go     starting yt-dlp (no console window, job object)
+//	toolbox.go   yt-dlp, FFmpeg, Deno: status and preparation
+//	tools.go     pinned FFmpeg and Deno (runtime.json), tools.json
+//	ytdlp.go     newest yt-dlp, checked with its signed checksum list
+//	pgp.go       the OpenPGP signature check (standard library only)
+//	download.go  checked downloads
+//	config.go    settings (INI) from one table
+//	open_*.go    Explorer, the videocatcher:// registration
 //	errors.go    UserError and how errors reach the page
 //	logging.go   log file with rotation       (same as template go-cli)
 //	paths.go     where settings and log live  (same as template go-cli)
@@ -53,15 +68,16 @@ func main() {
 
 	app := NewApp(paths, logger)
 	err = wails.Run(&options.App{
-		Title:     appName,
-		Width:     760,
-		Height:    560,
-		MinWidth:  520,
-		MinHeight: 420,
+		Title:     displayName,
+		Width:     1240,
+		Height:    820,
+		MinWidth:  940,
+		MinHeight: 620,
 		// Must match --bg in style.css, or the window flashes white.
-		BackgroundColour: &options.RGBA{R: 246, G: 246, B: 248, A: 255},
+		BackgroundColour: &options.RGBA{R: 242, G: 245, B: 246, A: 255},
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        app.startup,
+		OnShutdown:       app.shutdown,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId:               singleInstanceID,
 			OnSecondInstanceLaunch: app.onSecondInstance,
@@ -83,7 +99,7 @@ func main() {
 // example the WebView2 download) stay as Wails has them.
 func windowMessages() *windows.Messages {
 	m := windows.DefaultMessages()
-	m.WebView2ProcessCrash = "The Windows web view (WebView2) stopped. " + appName + " itself did not crash, " +
+	m.WebView2ProcessCrash = "The Windows web view (WebView2) stopped. " + displayName + " itself did not crash, " +
 		"and nothing was changed. Please start it again. If this keeps happening, repair the web view: " +
 		"Settings > Apps > Installed apps > Microsoft Edge WebView2 Runtime > Modify > Repair."
 	return m
