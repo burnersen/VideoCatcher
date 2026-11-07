@@ -42,7 +42,7 @@
 
 - **Almost any site:** everything [yt-dlp supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md), from YouTube to small video portals, including videos you only see when logged in (with the logins of your browser).
 - **See before you download:** title, length, every format with its size, subtitles in all languages, the entries of a playlist, and the exact file name it will get.
-- **The settings that matter, in plain words:** quality (best, 4K to 360p, audio only), file format, audio format and quality, subtitles (in the video, as a file, or both), playlists (all or only some entries), file name patterns, cover picture, chapters, YouTube sponsor segments, speed limit.
+- **The settings that matter, in plain words:** quality (best, 4K to 360p, audio only), file format, audio format and quality, subtitles (in the video, as a file, or both), playlists (all or only some entries), file name patterns or a name of your own for one video, cover picture, chapters, YouTube sponsor segments, speed limit.
 - **A real download manager:** a list with progress, speed and time left, several downloads at the same time, stop and try again, and the list survives a restart.
 - **yt-dlp stays up to date by itself,** and safely: a new yt-dlp is only used if its release is signed by the yt-dlp release key built into Video-Catcher.
 - **Errors in plain words:** "The site only shows this video to logged-in users" instead of a Python traceback, with what to do about it. What yt-dlp said is one click away.

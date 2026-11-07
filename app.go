@@ -54,10 +54,15 @@ const (
 	maxLogBuf = 100
 )
 
+// logLine is one line of the activity log. Key and Vars let the page show
+// the line in its own language (i18n.js, "log.*"); Text is the English
+// line for the log file and for a page that does not know the key.
 type logLine struct {
-	Level string `json:"level"`
-	Text  string `json:"text"`
-	Time  string `json:"time"`
+	Level string            `json:"level"`
+	Text  string            `json:"text"`
+	Time  string            `json:"time"`
+	Key   string            `json:"key,omitempty"`
+	Vars  map[string]string `json:"vars,omitempty"`
 }
 
 func NewApp(paths appPaths, logger *slog.Logger) *App {
@@ -89,7 +94,7 @@ func (a *App) startup(ctx context.Context) {
 	} else {
 		a.cfg = res.Config
 		if res.Created {
-			a.uiLog("info", "Settings file created: "+a.paths.ConfigFile)
+			a.uiLogKey("info", "log.configCreated", "Settings file created: "+a.paths.ConfigFile, map[string]string{"path": a.paths.ConfigFile})
 		}
 		for _, w := range res.Warnings {
 			a.uiLog("warn", w)
@@ -130,8 +135,12 @@ func (a *App) emit(name string, data any) {
 
 // uiLog writes a line into the activity log of the window. level: info,
 // ok, warn, error.
-func (a *App) uiLog(level, text string) {
-	l := logLine{Level: level, Text: text, Time: time.Now().Format("15:04:05")}
+func (a *App) uiLog(level, text string) { a.uiLogKey(level, "", text, nil) }
+
+// uiLogKey adds a line the page can translate: key names the text in
+// i18n.js, vars fill its {placeholders}.
+func (a *App) uiLogKey(level, key, text string, vars map[string]string) {
+	l := logLine{Level: level, Text: text, Time: time.Now().Format("15:04:05"), Key: key, Vars: vars}
 	a.mu.Lock()
 	a.logBuf = append(a.logBuf, l)
 	if len(a.logBuf) > maxLogBuf {
@@ -149,10 +158,10 @@ func (a *App) logError(err error) {
 func (a *App) prepareTools(check bool) {
 	if err := a.tools.Prepare(a.ctx, check); err != nil {
 		a.logger.Warn("tools", "err", err)
-		a.uiLog("warn", "Not all programs are ready. The tools panel says why.")
+		a.uiLogKey("warn", "log.notReady", "Not all programs are ready. The tools panel says why.", nil)
 		return
 	}
-	a.uiLog("ok", "yt-dlp, FFmpeg and Deno are ready.")
+	a.uiLogKey("ok", "log.ready", "yt-dlp, FFmpeg and Deno are ready.", nil)
 }
 
 // accept is where links from outside the window arrive (intake.go).
@@ -170,9 +179,9 @@ func (a *App) accept(req intakeRequest) {
 		return
 	}
 	if j.Status == jobConfirm {
-		a.uiLog("warn", "A web page sent a link. It waits in the list until you click OK: "+j.URL)
+		a.uiLogKey("warn", "log.webLink", "A web page sent a link. It waits in the list until you click OK: "+j.URL, map[string]string{"url": j.URL})
 	} else {
-		a.uiLog("info", "Link received: "+j.URL)
+		a.uiLogKey("info", "log.received", "Link received: "+j.URL, map[string]string{"url": j.URL})
 	}
 }
 
@@ -296,7 +305,7 @@ func (a *App) Preview(probeID string, o DownloadOptions) (string, error) {
 	info, ok := a.probes[probeID]
 	a.mu.Unlock()
 	if !ok || info.IsPlaylist {
-		return filepath.Join(o.OutputDir, o.Template), nil
+		return filepath.Join(o.OutputDir, o.outputTemplate()), nil
 	}
 	dir := filepath.Join(a.paths.DataDir, "partial")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -338,7 +347,7 @@ func (a *App) Add(link string, o DownloadOptions, title string) (Job, error) {
 		return Job{}, a.uiError(err)
 	}
 	if !a.tools.Ready("yt-dlp") {
-		a.uiLog("info", "The download starts as soon as yt-dlp is ready.")
+		a.uiLogKey("info", "log.waitTools", "The download starts as soon as yt-dlp is ready.", nil)
 	}
 	return j, nil
 }

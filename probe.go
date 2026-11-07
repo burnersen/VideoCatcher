@@ -269,7 +269,7 @@ var commonLanguage = map[string]bool{
 // previewArgs asks yt-dlp for the file name a download would get.
 func previewArgs(infoFile string, o DownloadOptions) []string {
 	return []string{"--ignore-config", "--color", "never", "--load-info-json", infoFile,
-		"-P", o.OutputDir, "-o", o.Template, "--print", "filename"}
+		"-P", o.OutputDir, "-o", o.outputTemplate(), "--print", "filename"}
 }
 
 // finalExtension corrects the preview: yt-dlp names the file before a

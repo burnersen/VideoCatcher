@@ -64,6 +64,20 @@ const presets = [
 
 const maxLogLines = 300;
 
+// baseName is the file name of a path without folder and ending:
+// "D:\\V\\Holiday [abc].mp4" -> "Holiday [abc]".
+function baseName(p) {
+  const name = String(p || "").split(/[\\/]/).pop();
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+// clock is the time of day for lines the page adds to the log itself.
+function clock(d) {
+  d = d || new Date();
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
 const ui = {
   init: null, // what Initial() returned
   info: null, // what is behind the last looked-up link
@@ -74,6 +88,9 @@ const ui = {
   jobs: new Map(),
   logLines: [],
   previewTimer: null,
+  autoName: "", // the name the pattern gives the looked-up video
+  ownNameEdited: false, // the user typed a name of their own
+  jobShapes: new Map(), // id -> what a row looks like apart from the numbers (see upsertJob)
 
   backend() {
     return (window.go && window.go.main && window.go.main.App) || null;
@@ -162,7 +179,22 @@ const ui = {
       embedMetadata: c("embed-metadata"), embedChapters: c("embed-chapters"),
       sponsorBlock: v("sponsor"), rateLimit: v("rate").trim(),
       fragments: Number(v("fragments")) || 1, cookies: v("cookies"),
+      fileName: this.ownName(),
     };
+  },
+
+  // ownName is the name typed for this one download, or "" for the
+  // pattern. It counts only while the field is shown.
+  ownName() {
+    if (this.el("opt-own-name").hidden || !this.ownNameEdited) return "";
+    const n = this.el("own-name").value.trim();
+    return n === this.autoName ? "" : n;
+  },
+
+  resetOwnName() {
+    this.ownNameEdited = false;
+    this.el("own-name").value = this.autoName;
+    this.schedulePreview();
   },
 
   updateVisibility() {
@@ -172,6 +204,7 @@ const ui = {
     this.el("opt-container").hidden = audio;
     this.el("opt-sub-langs").hidden = this.el("sub-mode").value === "none";
     this.el("opt-items").hidden = this.el("playlist").value !== "all";
+    this.el("opt-own-name").hidden = !this.info || !!this.info.isPlaylist || this.el("playlist").value === "all";
   },
 
   syncPreset() {
@@ -208,13 +241,19 @@ const ui = {
   },
 
   showInfo(m) {
+    if (m !== this.info) {
+      this.ownNameEdited = false;
+      this.autoName = "";
+      this.el("own-name").value = "";
+    }
     this.info = m;
     this.formatId = "";
     this.el("info").hidden = !m;
     this.el("info-empty").hidden = !!m;
     if (!m) {
       this.fillQuality([]);
-      this.el("preview").textContent = "";
+      this.updateVisibility();
+      this.schedulePreview();
       return;
     }
     const thumb = safeImage(m.thumbnail);
@@ -283,8 +322,16 @@ const ui = {
   async preview() {
     const app = this.backend();
     if (!app) return;
+    const info = this.info;
     try {
-      this.el("preview").textContent = await app.Preview(this.info ? this.info.probeId : "", this.options());
+      const name = await app.Preview(info ? info.probeId : "", this.options());
+      this.el("preview").textContent = name;
+      // The field starts with the name the pattern gives, so changing a
+      // word is enough. Once the user typed, the field is theirs.
+      if (info && info === this.info && !this.ownNameEdited) {
+        this.autoName = baseName(name);
+        this.el("own-name").value = this.autoName;
+      }
     } catch (err) {
       this.el("preview").textContent = String(err && err.message ? err.message : err).split("\n")[0];
     }
@@ -340,19 +387,22 @@ const ui = {
 
   // --- downloads ---
 
-  jobRow(j) {
+  jobParts(j) {
     const pct = j.status === "failed" ? "!" : j.status === "cancelled" ? "x" : Math.floor(j.percent || 0) + "%";
     const meta = [];
     const item = (text, cls) => meta.push(`<span${cls ? ` class="${cls}"` : ""}>${esc(text)}</span>`);
+    // The stage comes from Go in English (queue.go, postStepLabel) and is
+    // shown in the page's language when i18n.js knows it.
+    const stage = (x) => ("st." + x in globalThis.vcTexts.en ? t("st." + x) : x);
     if (j.status === "running") {
-      item(j.stage);
+      item(stage(j.stage));
       if (j.items > 0) item(t("job.item", { i: j.item, n: j.items }));
       if (j.total > 0) item(t("job.of", { a: formatSize(j.done), b: (j.estimated ? "~" : "") + formatSize(j.total) }), "num");
       if (j.speed > 0) item(formatSize(j.speed) + "/s", "num");
       if (j.eta > 0) item(t("job.eta", { t: formatDuration(j.eta) }), "num");
     } else {
       item(t("job." + j.status));
-      if (j.status === "done" && j.stage && j.stage !== "done") item(j.stage);
+      if (j.status === "done" && j.stage && j.stage !== "done") item(stage(j.stage));
     }
     item(hostOf(j.url));
 
@@ -373,18 +423,38 @@ const ui = {
     if ((j.details || []).length > 0 && (j.status === "failed" || j.status === "done")) {
       below += `<details><summary>${esc(t("job.details"))}</summary><pre>${esc(j.details.join("\n"))}</pre></details>`;
     }
-    return `<li id="job-${esc(j.id)}" class="job ${esc(j.status)}">` +
-      `<span class="pct">${esc(pct)}</span>` +
-      `<span class="title" title="${esc(j.url)}">${esc(j.title || j.url)}</span>` +
+    const id = esc(j.id);
+    const parts = {
+      pct,
+      title: j.title || j.url,
+      meta: meta.join(""),
+      width: Math.min(100, Math.max(0, Number(j.percent) || 0)) + "%",
+      // Everything else: when it stays the same, an update changes only
+      // the numbers (upsertJob).
+      shape: [j.status, j.url, actions.join(""), below].join("\u0000"),
+    };
+    parts.html = `<li id="job-${id}" class="job ${esc(j.status)}">` +
+      `<span id="job-${id}-pct" class="pct">${esc(pct)}</span>` +
+      `<span id="job-${id}-title" class="title" title="${esc(j.url)}">${esc(parts.title)}</span>` +
       `<span class="actions">${actions.join("")}</span>` +
-      `<span class="meta">${meta.join("")}</span>` +
-      `<span class="track"><span class="fill" style="width:${Math.min(100, Math.max(0, Number(j.percent) || 0))}%"></span></span>` +
+      `<span id="job-${id}-meta" class="meta">${parts.meta}</span>` +
+      `<span class="track"><span id="job-${id}-fill" class="fill" style="width:${parts.width}"></span></span>` +
       below + "</li>";
+    return parts;
+  },
+
+  jobRow(j) {
+    return this.jobParts(j).html;
   },
 
   renderJobs() {
     const list = [...this.jobs.values()].sort((a, b) => String(b.added).localeCompare(String(a.added)));
-    this.el("jobs").innerHTML = list.map((j) => this.jobRow(j)).join("");
+    this.jobShapes = new Map();
+    this.el("jobs").innerHTML = list.map((j) => {
+      const parts = this.jobParts(j);
+      this.jobShapes.set(j.id, parts.shape);
+      return parts.html;
+    }).join("");
     this.el("jobs-empty").hidden = list.length > 0;
     this.renderCounts();
   },
@@ -400,16 +470,29 @@ const ui = {
   },
 
   // upsertJob changes one row in place; a new job draws the whole list.
+  // While only the numbers change (progress comes four times a second), the
+  // row stays and only its numbers and bar change: a new row each time
+  // would swallow a click on "Stop" that starts on the old row and ends on
+  // the new one, and the bar could not glide.
   upsertJob(j) {
     const known = this.jobs.has(j.id);
     this.jobs.set(j.id, j);
     const row = known ? this.el("job-" + j.id) : null;
-    if (row) {
-      row.outerHTML = this.jobRow(j);
-      this.renderCounts();
-    } else {
+    if (!row) {
       this.renderJobs();
+      return;
     }
+    const parts = this.jobParts(j);
+    if (this.jobShapes.get(j.id) === parts.shape) {
+      this.el("job-" + j.id + "-pct").textContent = parts.pct;
+      this.el("job-" + j.id + "-title").textContent = parts.title;
+      this.el("job-" + j.id + "-meta").innerHTML = parts.meta;
+      this.el("job-" + j.id + "-fill").style.width = parts.width;
+    } else {
+      row.outerHTML = parts.html;
+      this.jobShapes.set(j.id, parts.shape);
+    }
+    this.renderCounts();
   },
 
   async onJobsClick(e) {
@@ -445,12 +528,22 @@ const ui = {
 
   // --- activity log ---
 
+  // A line with a key is shown in the page's language (and again in the
+  // new one after a switch); the text is the English line from Go.
+  logText(l) {
+    return l.key && l.key in globalThis.vcTexts.en ? t(l.key, l.vars) : l.text;
+  },
+
   log(entry) {
-    this.logLines.push(entry);
-    if (this.logLines.length > maxLogLines) this.logLines.shift();
+    if (entry) {
+      this.logLines.push(entry);
+      if (this.logLines.length > maxLogLines) this.logLines.shift();
+    }
+    // lvl-: a plain "info" would also be the class of the video info box.
     this.el("log").innerHTML = this.logLines.map((l) =>
-      `<li class="${esc(l.level)}"><span class="time">${esc(l.time)}</span>${esc(l.text)}</li>`).join("");
-    this.el("log-last").textContent = entry.text;
+      `<li class="lvl-${esc(l.level)}"><span class="time">${esc(l.time)}</span>${esc(this.logText(l))}</li>`).join("");
+    const last = this.logLines[this.logLines.length - 1];
+    this.el("log-last").textContent = last ? this.logText(last) : "";
   },
 
   // --- settings ---
@@ -486,7 +579,7 @@ const ui = {
       language: this.el("set-language").value,
       watchClipboard: this.el("set-watch-clipboard").checked,
     };
-    next.defaults = Object.assign({}, next.defaults, { formatId: "", playlistItems: "" });
+    next.defaults = Object.assign({}, next.defaults, { formatId: "", playlistItems: "", fileName: "" });
     try {
       await app.SaveSettings(next);
       const links = this.el("set-browser-links").checked;
@@ -496,7 +589,7 @@ const ui = {
       this.el("settings").close();
       if (folder !== s.downloadDir) this.el("folder").value = folder;
       if (langChanged) this.setLanguage(next.language);
-      this.log({ level: "ok", text: t("set.saved"), time: "" });
+      this.log({ level: "ok", key: "set.saved", text: "Settings saved.", time: clock() });
     } catch (err) {
       this.showError(err, "set-error");
     }
@@ -511,6 +604,7 @@ const ui = {
     if (this.info) this.showInfo(this.info);
     this.renderTools(this.tools);
     this.renderJobs();
+    this.log(null);
   },
 
   async checkUpdates() {
@@ -538,6 +632,8 @@ const ui = {
       this.schedulePreview();
     });
     on("template", "input", () => { this.syncPreset(); this.schedulePreview(); });
+    on("own-name", "input", () => { this.ownNameEdited = true; this.schedulePreview(); });
+    on("own-name-reset", "click", () => this.resetOwnName());
     for (const id of ["quality", "container", "audio-format", "sub-mode", "playlist"]) {
       on(id, "change", () => { this.updateVisibility(); this.schedulePreview(); });
     }
@@ -598,6 +694,7 @@ const ui = {
       for (const l of this.init.log || []) this.log(l);
       this.el("version").textContent = this.init.version;
       this.listen();
+      this.schedulePreview();
     } catch (err) {
       this.showError(err);
     }
@@ -609,5 +706,6 @@ globalThis.kitUI = ui;
 globalThis.kitFormatSize = formatSize;
 globalThis.vcEsc = esc;
 globalThis.vcFormatDuration = formatDuration;
+globalThis.vcBaseName = baseName;
 
 document.addEventListener("DOMContentLoaded", () => ui.start());

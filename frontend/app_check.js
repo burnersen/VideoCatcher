@@ -10,6 +10,8 @@ const { loadPage, check, done, dist, target } = require("./check_harness");
 
 const html = fs.readFileSync(path.join(dist, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(dist, "app.js"), "utf8");
+const css = fs.readFileSync(path.join(dist, "style.css"), "utf8");
+const appGo = fs.readFileSync(path.join(__dirname, "..", "app.go"), "utf8");
 
 const choices = {
   quality: ["best", "2160", "1440", "1080", "720", "480", "360", "audio"],
@@ -110,6 +112,26 @@ function backend(over) {
   await p.runTimers();
   check("file name preview shown", p.el("preview").textContent.endsWith("Found it [abc].mp4"));
 
+  // A name of your own: the field starts with the pattern's name, and only a
+  // changed name goes to Go.
+  check("own name field shown for a single video", p.el("opt-own-name").hidden === false);
+  check("own name starts with the pattern's name", p.el("own-name").value === "Found it [abc]", p.el("own-name").value);
+  check("untouched own name is not sent", p.ui.options().fileName === "");
+  p.el("own-name").value = "  Holiday 2026 ";
+  await p.el("own-name").fire("input");
+  check("typed own name is sent, trimmed", p.ui.options().fileName === "Holiday 2026");
+  await p.runTimers();
+  check("typed name stays while the preview updates", p.el("own-name").value === "  Holiday 2026 ");
+  await p.el("own-name-reset").click();
+  check("reset brings the pattern back", p.el("own-name").value === "Found it [abc]" && p.ui.options().fileName === "");
+  p.el("own-name").value = "Holiday 2026";
+  await p.el("own-name").fire("input");
+  p.el("playlist").value = "all";
+  p.ui.updateVisibility();
+  check("no own name for a whole playlist", p.el("opt-own-name").hidden === true && p.ui.options().fileName === "");
+  p.el("playlist").value = "single";
+  p.ui.updateVisibility();
+
   // A video stream without sound gets the best sound.
   p.ui.chooseFormat("137", true, false);
   check("video-only format gets audio", p.ui.options().formatId === "137+ba/137");
@@ -119,6 +141,8 @@ function backend(over) {
   await p.el("add").click();
   const add = b.calls.find((c) => c[0] === "Add");
   check("added with title and options", add && add[3] === "Found <b>it</b>" && add[2].template === defaults.template);
+  check("added with the own name", add && add[2].fileName === "Holiday 2026");
+  check("own name gone after adding", p.el("opt-own-name").hidden === true && p.el("own-name").value === "" && p.ui.ownNameEdited === false);
   check("row in the list", p.el("jobs").innerHTML.includes('id="job-j9"'));
   check("titles from sites are escaped in the list", p.el("jobs").innerHTML.includes("Found &lt;b&gt;it&lt;/b&gt;") && !p.el("jobs").innerHTML.includes("<b>it</b>"));
   check("empty text hidden", p.el("jobs-empty").hidden === true);
@@ -140,15 +164,65 @@ function backend(over) {
   await p.ui.onJobsClick({ target: target({ action: "remove", id: "j9" }) });
   check("remove takes the row away", !p.el("jobs").innerHTML.includes("job-j9"));
 
-  // Progress events update the row in place.
+  // Progress events change only the numbers and the bar of the row (a new
+  // row four times a second would swallow clicks on "Stop").
   p.events.job(job({ id: "j5" }));
-  p.events.job(job({ id: "j5", percent: 80 }));
-  check("progress event shown", p.el("job-j5").outerHTML.includes(">80%<"));
+  check("new job: row with a bar", p.el("jobs").innerHTML.includes('id="job-j5-fill" class="fill" style="width:42.7%"'));
+  p.el("job-j5").outerHTML = "untouched";
+  p.events.job(job({ id: "j5", percent: 80, speed: 1048576 }));
+  check("progress: number and bar change", p.el("job-j5-pct").textContent === "80%" && p.el("job-j5-fill").style.width === "80%");
+  check("progress: meta changes", p.el("job-j5-meta").innerHTML.includes("1.0 MB/s"));
+  check("progress: the row itself stays", p.el("job-j5").outerHTML === "untouched");
+
+  // The bar can show at all: the fill is a span and needs a block box, and
+  // every part of a row has its own grid column (0.1.0 had neither).
+  const rule = (sel) => (new RegExp("(^|\\n)" + sel.replace(/[.*]/g, "\\$&") + " \\{([^}]*)\\}").exec(css) || [])[2] || "";
+  check("fill is a block", /display:\s*block/.test(rule(".fill")), rule(".fill"));
+  check("track is a block", /display:\s*block/.test(rule(".track")), rule(".track"));
+  check("title in column 2", /grid-column:\s*2;/.test(rule(".job .title")));
+  check("buttons in column 3", /grid-column:\s*3;/.test(rule(".job .actions")));
   check("counts", p.el("jobs-counts").textContent === "1 running, 0 waiting", p.el("jobs-counts").textContent);
+  p.events.job(job({ id: "j5", status: "done", percent: 100, files: ["C:\\a.mp4"] }));
+  check("new state: the row is drawn again", p.el("job-j5").outerHTML.includes('data-action="show"'));
 
   // Log lines are text, never markup.
   p.events.log({ level: "warn", text: "<i>x</i>", time: "14:00:00" });
   check("log escaped", p.el("log").innerHTML.includes("&lt;i&gt;x&lt;/i&gt;"));
+  check("log level class does not clash with .info", p.el("log").innerHTML.includes('class="lvl-warn"'));
+
+  // Every stage Go reports has a text in both languages.
+  const goSrc = ["queue.go", "progress.go"].map((f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8")).join("\n");
+  const stages = new Set();
+  for (const line of goSrc.split("\n")) {
+    const m = /(?:Stage\b[^=\n]*=[^"\n]*|Stage:\s*)"([^"]+)"/.exec(line);
+    if (m) stages.add(m[1]);
+  }
+  const labels = /func postStepLabel[\s\S]*?\n}/.exec(goSrc)[0];
+  for (const m of labels.matchAll(/return "([^"]+)"/g)) stages.add(m[1]);
+  check("stages found in Go", stages.size > 15, [...stages]);
+  for (const st of stages) check(`stage "${st}" has a text`, en.includes("st." + st));
+  {
+    const g = loadPage(backend(), "de-DE");
+    await g.docListeners.DOMContentLoaded();
+    check("stage in German", g.ui.jobRow(job({ stage: "joining picture and sound" })).includes("Bild und Ton zusammenfügen"));
+    check("unknown stage as it is", g.ui.jobRow(job({ stage: "something new" })).includes("something new"));
+  }
+
+  // Log lines from Go with a key show in the page's language.
+  for (const m of appGo.matchAll(/uiLogKey\("[a-z]+", "([^"]+)"/g)) check(`log text "${m[1]}" exists`, en.includes(m[1]));
+  {
+    const g = loadPage(backend({ SaveSettings: async () => {}, SetBrowserLinks: async () => {} }), "de-DE");
+    await g.docListeners.DOMContentLoaded();
+    g.events.log({ level: "info", text: "Link received: https://x.org/v", key: "log.received", vars: { url: "https://x.org/v" }, time: "14:00:00" });
+    check("log line in German", g.el("log").innerHTML.includes("Link angekommen: https://x.org/v"), g.el("log").innerHTML);
+    g.events.log({ level: "info", text: "Something new", key: "log.unknownKey", time: "14:00:01" });
+    check("unknown key: the English text", g.el("log").innerHTML.includes("Something new"));
+    g.ui.setLanguage("en");
+    check("log follows a language switch", g.el("log").innerHTML.includes("Link received: https://x.org/v"));
+    g.ui.init.settings.language = "auto";
+    await g.el("set-save").click();
+    check("page's own log line has a time", /<span class="time">\d\d:\d\d:\d\d<\/span>Einstellungen gespeichert\./.test(g.el("log").innerHTML), g.el("log").innerHTML);
+  }
 
   // Errors from Go: message and hint on separate lines, button back.
   {
@@ -161,6 +235,17 @@ function backend(over) {
     check("info hidden after an error", q.el("info").hidden === true);
     check("button enabled after an error", q.el("lookup").disabled === false);
   }
+
+  // The preview is there before anything is looked up.
+  {
+    let asked = 0;
+    const v = loadPage(backend({ Preview: async () => { asked++; return "D:\\Videos\\%(title)s.%(ext)s"; } }));
+    await v.docListeners.DOMContentLoaded();
+    await v.runTimers();
+    check("preview on start", asked === 1 && v.el("preview").textContent.includes("%(title)s"));
+    check("no own name without a looked-up video", v.el("opt-own-name").hidden === true);
+  }
+  check("baseName", p.baseName("D:\\V\\sub/Holiday [abc].mp4") === "Holiday [abc]" && p.baseName("noext") === "noext");
 
   // Audio only shows the audio fields and hides the container.
   p.el("quality").value = "audio";

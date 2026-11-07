@@ -196,3 +196,48 @@ func TestFinalExtension(t *testing.T) {
 		t.Errorf("mp3: %s", got)
 	}
 }
+
+// A name of your own for one download replaces the pattern, keeps the
+// extension yt-dlp picks and is taken literally (a "%" is not a field).
+func TestOwnFileName(t *testing.T) {
+	o := testOptions(t)
+	o.FileName = "Holiday 100% [cut]"
+	if err := o.validate(); err != nil {
+		t.Fatal(err)
+	}
+	a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "")
+	if !pair(a, "-o", "Holiday 100%% [cut].%(ext)s") {
+		t.Errorf("own name not used: %v", a)
+	}
+	if p := previewArgs("info.json", o); !pair(p, "-o", "Holiday 100%% [cut].%(ext)s") {
+		t.Errorf("preview does not use the own name: %v", p)
+	}
+	o.FileName = ""
+	if got := o.outputTemplate(); got != o.Template {
+		t.Errorf("empty name must keep the pattern, got %q", got)
+	}
+}
+
+func TestOwnFileNameRefused(t *testing.T) {
+	for _, n := range []string{"   ", `a\b`, "a/b", "../x", "C:x", "what?", "a*b", `say "hi"`, "a|b", "a<b",
+		"ends with dot.", " leading", "trailing ", "tab\there", "CON", "nul.txt", "com1", "LPT9",
+		strings.Repeat("x", maxFileNameLen+1)} {
+		o := testOptions(t)
+		o.FileName = n
+		if err := o.validate(); err == nil {
+			t.Errorf("%q was accepted", n)
+		}
+	}
+	for _, n := range []string{"Holiday 2026", "Konsole", "COM10", "a.b", "Über & Ärger (1080p)", "日本語"} {
+		o := testOptions(t)
+		o.FileName = n
+		if err := o.validate(); err != nil {
+			t.Errorf("%q was refused: %v", n, err)
+		}
+	}
+	o := testOptions(t)
+	o.FileName, o.Playlist = "One name", "all"
+	if err := o.validate(); err == nil {
+		t.Error("a name of your own for a whole playlist was accepted")
+	}
+}

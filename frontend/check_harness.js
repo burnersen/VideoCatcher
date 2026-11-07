@@ -20,7 +20,7 @@ function fakeElement(id) {
   const el = {
     id, textContent: "", value: "", hidden: false, disabled: false, checked: false,
     innerHTML: "", outerHTML: "", placeholder: "", src: "", name: "",
-    className: "", dataset: {}, listeners: {}, open: false,
+    className: "", dataset: {}, listeners: {}, open: false, style: {},
     addEventListener(type, fn) { (el.listeners[type] = el.listeners[type] || []).push(fn); },
     fire(type, event) { return Promise.all((el.listeners[type] || []).map((fn) => fn(event || { target: el }))); },
     click() { return el.fire("click"); },
@@ -63,7 +63,7 @@ function loadPage(backend, language) {
   const runTimers = async () => { while (timers.length) await timers.shift()(); };
   return {
     ui: context.kitUI, formatSize: context.kitFormatSize, esc: context.vcEsc, t: context.vcT,
-    texts: context.vcTexts, formatDuration: context.vcFormatDuration,
+    texts: context.vcTexts, formatDuration: context.vcFormatDuration, baseName: context.vcBaseName,
     elements, el: document.getElementById, docListeners, events, runTimers,
   };
 }

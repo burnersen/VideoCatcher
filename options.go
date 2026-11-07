@@ -41,6 +41,7 @@ type DownloadOptions struct {
 	RateLimit      string `json:"rateLimit"`      // empty, or e.g. "5M" (bytes per second)
 	Fragments      int    `json:"fragments"`      // parallel fragments for HLS/DASH, 1 to 16
 	Cookies        string `json:"cookies"`        // none, or the browser to take cookies from
+	FileName       string `json:"fileName"`       // a name for this one download, without extension; empty means Template
 }
 
 // Lists of what the window may send. The window builds its menus from the
@@ -63,6 +64,7 @@ const (
 	maxFragments   = 16   // more brings nothing on a home line and annoys servers
 	maxTemplateLen = 300  // a Windows path has 260 characters by default
 	maxURLLen      = 4096 // longer is no link someone pasted
+	maxFileNameLen = 200  // leaves room for the folder within Windows' 260 characters
 )
 
 var (
@@ -130,7 +132,71 @@ func (o DownloadOptions) validate() error {
 		return userError(fmt.Errorf("output dir %q", o.OutputDir),
 			"No download folder is chosen", "Choose a folder for the downloads.")
 	}
-	return checkTemplate(o.Template)
+	if err := checkTemplate(o.Template); err != nil {
+		return err
+	}
+	return o.checkFileName()
+}
+
+// checkFileName checks a name the user typed for one download. It is a
+// plain file name: no folder, no characters Windows refuses, no device
+// name. The extension comes from yt-dlp.
+func (o DownloadOptions) checkFileName() error {
+	n := o.FileName
+	if n == "" {
+		return nil
+	}
+	hint := `Type a name without a folder, for example "Holiday 2026".`
+	bad := func(err error, msg string) error { return userError(err, msg, hint) }
+	switch {
+	case o.Playlist == "all":
+		return userError(errors.New("file name for a playlist"), "A name of your own works only for a single video",
+			`For a playlist, choose a file name pattern, or set "Playlist" to "Only this video".`)
+	case strings.TrimSpace(n) == "":
+		return bad(errors.New("blank file name"), "The file name is empty")
+	case len(n) > maxFileNameLen:
+		return bad(fmt.Errorf("file name has %d bytes", len(n)), "The file name is too long")
+	case strings.ContainsAny(n, `<>:"/\|?*`):
+		return bad(fmt.Errorf("file name %q has a reserved character", n), `The file name must not contain \ / : * ? " < > |`)
+	case strings.HasSuffix(n, ".") || strings.HasSuffix(n, " ") || strings.HasPrefix(n, " "):
+		return bad(fmt.Errorf("file name %q starts or ends with a space or dot", n), "The file name must not start or end with a space or end with a dot")
+	}
+	for _, r := range n {
+		if r < 32 || r == 127 {
+			return bad(fmt.Errorf("file name %q has a control character", n), "The file name contains an invisible character")
+		}
+	}
+	if isWindowsDeviceName(n) {
+		return bad(fmt.Errorf("file name %q is a device name", n), "Windows does not allow this file name")
+	}
+	return nil
+}
+
+// isWindowsDeviceName reports names Windows keeps for devices (CON, NUL,
+// COM1 ...), also with an extension after them ("nul.txt").
+func isWindowsDeviceName(n string) bool {
+	base := strings.ToUpper(strings.TrimSpace(n))
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		base = strings.TrimSpace(base[:i])
+	}
+	switch base {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '0' && base[3] <= '9' {
+		return true
+	}
+	return false
+}
+
+// outputTemplate is the -o value for yt-dlp: the user's own name with the
+// extension yt-dlp picks, or the pattern. A "%" in the user's name is
+// doubled, so yt-dlp writes it as it is instead of reading a field.
+func (o DownloadOptions) outputTemplate() string {
+	if o.FileName == "" || o.Playlist == "all" {
+		return o.Template
+	}
+	return strings.ReplaceAll(o.FileName, "%", "%%") + ".%(ext)s"
 }
 
 // checkTemplate makes sure a file name template stays inside the download
@@ -199,7 +265,7 @@ func buildArgs(o DownloadOptions, link string, ts toolSet, have func(tool string
 		"--no-overwrites", // README promise: an existing file is never overwritten
 		"-P", o.OutputDir,
 		"-P", "temp:" + jp.Temp,
-		"-o", o.Template,
+		"-o", o.outputTemplate(),
 		"-N", strconv.Itoa(o.Fragments),
 	}
 	if runtime.GOOS == "windows" {

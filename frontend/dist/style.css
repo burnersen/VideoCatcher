@@ -149,6 +149,7 @@ input[readonly] { color: var(--muted); }
   gap: 4px 12px;
   margin-top: 14px;
 }
+.info:has(> .thumb[hidden]) { grid-template-columns: 1fr; } /* no picture: the text takes the width */
 .thumb { width: 132px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; background: var(--line); }
 .info h2 { font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
 .info-text p { font-size: 13px; margin-top: 3px; }
@@ -187,7 +188,7 @@ input[readonly] { color: var(--muted); }
 .job-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
 .job {
   display: grid;
-  grid-template-columns: 74px 1fr auto;
+  grid-template-columns: 92px 1fr auto; /* room for "100%" */
   gap: 2px 14px;
   padding: 12px 0 13px;
   border-bottom: 1px solid var(--line);
@@ -203,12 +204,16 @@ input[readonly] { color: var(--muted); }
 .job.running .pct { color: var(--ink); }
 .job.done .pct { color: var(--ok); }
 .job.failed .pct, .job.cancelled .pct { color: var(--muted); font-size: 22px; }
-.job .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.job .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); }
+.job .title { grid-column: 2; grid-row: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job .meta { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); }
 .job .meta .num { font-family: var(--num); font-variant-numeric: tabular-nums; }
-.job .actions { grid-row: 1 / span 2; display: flex; gap: 6px; align-items: start; }
-.track { grid-column: 2 / -1; height: 6px; margin-top: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
-.fill { height: 100%; width: 0; background: var(--signal); transition: width 0.25s linear; }
+/* Every part has its place: with only a row, the grid put the buttons next
+   to the number and pushed the title to the right edge (0.1.0). */
+.job .actions { grid-column: 3; grid-row: 1 / span 2; display: flex; gap: 6px; align-items: start; }
+.track { display: block; grid-column: 2 / -1; grid-row: 3; height: 6px; margin-top: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+/* The fill is a span: without display:block it is an inline box, which has
+   no width or height, and the bar stays empty (0.1.0). */
+.fill { display: block; height: 100%; width: 0; background: var(--signal); transition: width 0.25s linear; }
 .job.done .fill { background: var(--ok); }
 .job.failed .fill, .job.cancelled .fill { background: var(--muted); }
 .job .error-text { grid-column: 2 / -1; margin-top: 6px; color: var(--bad); font-size: 13px; }
@@ -225,10 +230,10 @@ input[readonly] { color: var(--muted); }
 .log-actions { margin: 4px 0; }
 .log-list { list-style: none; margin: 0; padding: 0; max-height: 150px; overflow-y: auto; }
 .log-list li { padding: 1px 0; }
-.log-list .time { font-family: var(--num); color: var(--muted); margin-right: 8px; }
-.log-list .warn { color: #a76c00; }
-.log-list .error { color: var(--bad); }
-.log-list .ok { color: var(--ok); }
+.log-list .time { display: inline-block; min-width: 5.5em; font-family: var(--num); color: var(--muted); margin-right: 8px; }
+.log-list .lvl-warn { color: #a76c00; }
+.log-list .lvl-error { color: var(--bad); }
+.log-list .lvl-ok { color: var(--ok); }
 .foot { padding: 3px 20px 6px; font-size: 11.5px; color: var(--muted); }
 
 /* --- settings --- */
