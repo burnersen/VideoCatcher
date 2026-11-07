@@ -24,7 +24,7 @@ Gilt für jede KI, die hier arbeitet (`AGENTS.md` zeigt hierher). Diese Datei is
 gofmt -l .                      # muss leer bleiben
 GOOS=windows go vet ./...
 go test -race -count=1 ./...
-node frontend/app_check.js      # Seite ohne Browser prüfen
+node frontend/app_check.js      # Seite ohne Browser prüfen (lädt i18n.js und app.js)
 wails build -platform windows/amd64 -skipbindings -trimpath   # nur unter Windows
 ```
 
@@ -32,11 +32,15 @@ Release: Tag `v1.2.3` pushen, vorher `.github/release-notes/1.2.3.md` schreiben 
 
 ## Aufbau
 
-Siehe Kopfkommentar in `main.go`. Jede Methode in `app.go` gibt Fehler nur über `uiError` an die Seite (erste Zeile Meldung, zweite Zeile Hinweis), die technische Ursache geht ins Log. Ein Fehler beim Start zeigt ein Meldungsfenster (`showFatal`), nie `log.Fatal`. Die Seite liegt in `frontend/dist` (HTML, CSS, JS getrennt, kein npm), geprüft wird sie mit `frontend/*_check.js`. `logging.go`, `paths.go` und `files.go` sind dieselben wie in der Vorlage `go-cli`.
+Siehe Kopfkommentar in `main.go` (Liste aller Dateien). Kurz: `queue.go` ist der Download-Manager (ein yt-dlp-Lauf je Auftrag), `options.go` macht aus den Einstellungen die Argumentliste, `toolbox.go`/`tools.go`/`ytdlp.go` holen und prüfen yt-dlp, FFmpeg und Deno, `intake.go` nimmt Links von außen an (Format in `docs/browser-bridge.md`). Die Logik ist frei von Wails und läuft in den Tests unter Linux; nur `app.go` und `main.go` brauchen Wails. Jede Methode in `app.go` gibt Fehler nur über `uiError` an die Seite (erste Zeile Meldung, zweite Zeile Hinweis), die technische Ursache geht ins Log. Ein Fehler beim Start zeigt ein Meldungsfenster (`showFatal`), nie `log.Fatal`. Die Seite liegt in `frontend/dist` (HTML, CSS, JS getrennt, kein npm), geprüft wird sie mit `frontend/*_check.js`. `logging.go`, `paths.go` und `files.go` sind dieselben wie in der Vorlage `go-cli`.
 
 ## Bewusste Abweichungen vom Kit
 
 - **S4, yt-dlp ohne festgenagelte Prüfsumme** (`projekt-pruefen.sh` meldet es als WARNUNG): yt-dlp muss neu sein, sonst funktionieren die Seiten nicht mehr. Deshalb die neueste stabile Version, aber nur, wenn ihre Prüfsummenliste mit dem eingebauten yt-dlp-Schlüssel signiert ist (Fingerabdruck in `ytdlp.go`) und die Datei zur Liste passt. Ablauf und Tests: `ytdlp.go`, `pgp.go`, `tools_test.go`. FFmpeg und Deno sind wie üblich in `runtime.json` festgenagelt.
+
+## Live-Test
+
+`live_test.go` lädt die echten Programme und macht einen echten Download. Er läuft nur mit `VIDEOCATCHER_TEST_LIVE=1`, im Workflow "Live test" auf GitHub (von Hand, wöchentlich und bei Änderungen an den Download-Teilen). In einer Cloud-Sitzung dürfen heruntergeladene Programme nicht laufen, dort also nie.
 
 ## Vor jedem Commit
 

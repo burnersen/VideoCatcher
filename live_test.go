@@ -18,10 +18,11 @@ import (
 	"time"
 )
 
-// liveTestURL is a short video that is meant for tests: yt-dlp's own test
-// video. VIDEOCATCHER_TEST_URL replaces it, for sites that block the
-// runners of GitHub.
-const liveTestURL = "https://www.youtube.com/watch?v=BaW_jenozKc"
+// liveTestURL is a 10 second test video (1 MB) of a site that offers them
+// for exactly this. YouTube is not the default: it blocks the runners of
+// GitHub ("This video is unavailable" for yt-dlp's own test video, seen on
+// 2026-11-07). VIDEOCATCHER_TEST_URL tests another link by hand.
+const liveTestURL = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
 
 func TestLiveRealDownload(t *testing.T) {
 	if os.Getenv("VIDEOCATCHER_TEST_LIVE") != "1" {
