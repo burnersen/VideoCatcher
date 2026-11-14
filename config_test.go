@@ -151,3 +151,59 @@ func writeConfig(t *testing.T, content string) string {
 	}
 	return path
 }
+
+func TestWindowSize(t *testing.T) {
+	for v, want := range map[string]windowState{
+		"":              {defaultWindowWidth, defaultWindowHeight, false},
+		"1600x900":      {1600, 900, false},
+		"1600x900,max":  {1600, 900, true},
+		"940x620":       {940, 620, false},
+		"16384x16384":   {16384, 16384, false},
+		"1240x820,max ": {defaultWindowWidth, defaultWindowHeight, false}, // not the form
+	} {
+		got, err := parseWindow(v)
+		if got != want {
+			t.Errorf("parseWindow(%q) = %+v, want %+v", v, got, want)
+		}
+		if (err != nil) != (strings.TrimSpace(v) != v) {
+			t.Errorf("parseWindow(%q): %v", v, err)
+		}
+		if err == nil && v != "" && got.String() != v {
+			t.Errorf("%q is written back as %q", v, got.String())
+		}
+	}
+	// Too small, too large, not a size: refused, the default is used.
+	for _, v := range []string{"160x28", "939x620", "940x619", "20000x900", "big", "1240", "1240x820x3", "-1240x820", "1240x820,min"} {
+		if got, err := parseWindow(v); err == nil || got.Width != defaultWindowWidth || got.Height != defaultWindowHeight || got.Maximised {
+			t.Errorf("parseWindow(%q) = %+v, %v", v, got, err)
+		}
+	}
+}
+
+// main.go reads the size before the window exists: it must not create or
+// change the file, and a broken value gives the default.
+func TestSavedWindowOnlyReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "VideoCatcher.ini")
+	if got := savedWindow(path); got.Width != defaultWindowWidth || got.Maximised {
+		t.Fatalf("no file: %+v", got)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("the file was created")
+	}
+	for text, want := range map[string]windowState{
+		"\ufeffquality=best\r\nWindow = 1500x1000,max\r\n": {1500, 1000, true},
+		"# window=1x1\nwindow=1300x700\n":                  {1300, 700, false},
+		"window=1x1\n":                                     {defaultWindowWidth, defaultWindowHeight, false},
+		"quality=best\n":                                   {defaultWindowWidth, defaultWindowHeight, false},
+	} {
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := savedWindow(path); got != want {
+			t.Errorf("%q: %+v, want %+v", text, got, want)
+		}
+		if after, err := os.ReadFile(path); err != nil || string(after) != text {
+			t.Errorf("%q was changed", text)
+		}
+	}
+}

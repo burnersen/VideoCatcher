@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"syscall"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -26,6 +27,21 @@ func showInFolder(path string) error {
 		return fmt.Errorf("start explorer: %w", err)
 	}
 	go cmd.Wait() // ignore: its exit code means nothing, see above
+	return nil
+}
+
+// openFile opens a file with the program Windows has for its kind, like a
+// double click in Explorer. The caller decides which kinds (app.go,
+// playable).
+func openFile(path string) error {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	verb, _ := windows.UTF16PtrFromString("open") // ignore: constant text without NUL
+	if err := windows.ShellExecute(0, verb, p, nil, nil, windows.SW_SHOWNORMAL); err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
 	return nil
 }
 

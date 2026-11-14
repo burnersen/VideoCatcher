@@ -23,6 +23,7 @@ func TestTrayStartsAndCloses(t *testing.T) {
 			t.Logf("icon not shown here: %v", err)
 		}
 		tr.SetTip("Video-Catcher: 2")
+		tr.Notify("Video-Catcher", "All downloads are done")
 		tr.Hide()
 		if tr.Visible() {
 			t.Fatal("still visible after Hide")

@@ -93,14 +93,29 @@ func ytdlpAsset(goos, goarch string) (string, error) {
 		"yt-dlp has no ready-made program for this computer", "")
 }
 
-// latestYtDlpTag asks GitHub which release is the newest. It reads the
-// redirect of /releases/latest instead of the API: no rate limit, no JSON.
+// latestYtDlpTag asks GitHub which release is the newest.
 func latestYtDlpTag(ctx context.Context, client *http.Client) (string, error) {
+	tag, err := latestReleaseTag(ctx, client, ytdlpRepo, "the yt-dlp version list")
+	if err != nil {
+		return "", err
+	}
+	if !ytdlpTagPattern.MatchString(tag) {
+		return "", userError(fmt.Errorf("newest yt-dlp release: tag %q", tag),
+			"Cannot find out which yt-dlp is the newest", "Try again later. The installed yt-dlp keeps working.")
+	}
+	return tag, nil
+}
+
+// latestReleaseTag reads the tag of the newest release of a GitHub
+// repository from the redirect of /releases/latest instead of the API: no
+// rate limit, no JSON. The tag is "" when the answer names none (no
+// release, a private repository); the caller checks its form.
+func latestReleaseTag(ctx context.Context, client *http.Client, repo, what string) (string, error) {
 	noFollow := *client
 	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ytdlpRepo+"/releases/latest", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, repo+"/releases/latest", nil)
 	if err != nil {
-		return "", fmt.Errorf("ask for the newest yt-dlp: %w", err)
+		return "", fmt.Errorf("ask for the newest release: %w", err)
 	}
 	req.Header.Set("User-Agent", userAgent)
 	resp, err := noFollow.Do(req)
@@ -108,14 +123,12 @@ func latestYtDlpTag(ctx context.Context, client *http.Client) (string, error) {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		return "", netError(err, "the yt-dlp version list")
+		return "", netError(err, what)
 	}
 	resp.Body.Close() // ignore: only the header counts
-	loc := resp.Header.Get("Location")
-	_, tag, found := strings.Cut(loc, "/releases/tag/")
-	if resp.StatusCode/100 != 3 || !found || !ytdlpTagPattern.MatchString(tag) {
-		return "", userError(fmt.Errorf("HTTP %s, Location %q", resp.Status, loc),
-			"Cannot find out which yt-dlp is the newest", "Try again later. The installed yt-dlp keeps working.")
+	_, tag, found := strings.Cut(resp.Header.Get("Location"), "/releases/tag/")
+	if resp.StatusCode/100 != 3 || !found {
+		return "", nil
 	}
 	return tag, nil
 }

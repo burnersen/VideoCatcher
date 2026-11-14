@@ -13,3 +13,9 @@ var errPowerNotHere = errors.New("not available on this system yet")
 
 func suspendPC(bool) error { return errPowerNotHere }
 func shutdownPC() error    { return errPowerNotHere }
+
+// awake: nothing keeps the PC awake here yet.
+type awake struct{}
+
+func newAwake() *awake  { return &awake{} }
+func (*awake) Set(bool) {}

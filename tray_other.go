@@ -15,6 +15,11 @@ type TrayTexts struct {
 	Running      string `json:"running"`
 	BalloonTitle string `json:"balloonTitle"`
 	BalloonText  string `json:"balloonText"`
+	AllDoneTitle string `json:"allDoneTitle"`
+	AllDoneText  string `json:"allDoneText"`
+	AllDoneBad   string `json:"allDoneBad"`
+	FailedTitle  string `json:"failedTitle"`
+	FailedText   string `json:"failedText"`
 }
 
 // trayIcon: Linux comes later (E9); without an icon the close button
@@ -29,6 +34,7 @@ func (*trayIcon) SetTexts(TrayTexts)      {}
 func (*trayIcon) Show(string, bool) error { return errors.New("no tray") }
 func (*trayIcon) Hide()                   {}
 func (*trayIcon) SetTip(string)           {}
+func (*trayIcon) Notify(string, string)   {}
 func (*trayIcon) Visible() bool           { return false }
 func (*trayIcon) Texts() TrayTexts        { return TrayTexts{} }
 func (*trayIcon) Close()                  {}

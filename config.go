@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -27,6 +28,70 @@ type config struct {
 	CloseAction    string // closeChoices
 	SpeedPercent   int    // the speed slider, 1 to 100
 	MeasuredSpeed  int64  // bytes per second: 100 % of the slider (speed.go); 0 = not measured yet
+	Window         string // size of the window when it was last closed (parseWindow); "" = the default
+}
+
+// The window: its size at the start and the smallest it can get. A saved
+// size outside these limits is a typo or a broken screen setup.
+const (
+	defaultWindowWidth, defaultWindowHeight = 1240, 820
+	minWindowWidth, minWindowHeight         = 940, 620
+	maxWindowSide                           = 16384
+)
+
+// windowState is the saved size of the window.
+type windowState struct {
+	Width, Height int
+	Maximised     bool
+}
+
+var windowPattern = regexp.MustCompile(`^([0-9]{3,5})x([0-9]{3,5})(,max)?$`)
+
+// parseWindow reads "1240x820" or "1240x820,max". "" is the default size.
+func parseWindow(v string) (windowState, error) {
+	w := windowState{Width: defaultWindowWidth, Height: defaultWindowHeight}
+	if v == "" {
+		return w, nil
+	}
+	m := windowPattern.FindStringSubmatch(v)
+	if m == nil {
+		return w, errors.New("use width x height, e.g. 1240x820, or leave it empty")
+	}
+	width, _ := strconv.Atoi(m[1])  // ignore: the pattern allows only digits
+	height, _ := strconv.Atoi(m[2]) // ignore: the pattern allows only digits
+	if width < minWindowWidth || height < minWindowHeight || width > maxWindowSide || height > maxWindowSide {
+		return w, fmt.Errorf("use at least %dx%d", minWindowWidth, minWindowHeight)
+	}
+	return windowState{Width: width, Height: height, Maximised: m[3] != ""}, nil
+}
+
+func (w windowState) String() string {
+	s := strconv.Itoa(w.Width) + "x" + strconv.Itoa(w.Height)
+	if w.Maximised {
+		s += ",max"
+	}
+	return s
+}
+
+// savedWindow reads only the window size from the settings file, before
+// the window exists and without changing the file. Anything that is wrong
+// gives the default; loadConfig reports it a moment later.
+func savedWindow(path string) windowState {
+	def, _ := parseWindow("") // ignore: the default has no error
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return def
+	}
+	for _, line := range strings.Split(strings.TrimPrefix(string(data), "\ufeff"), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "window") {
+			if w, err := parseWindow(strings.TrimSpace(value)); err == nil {
+				return w
+			}
+			return def
+		}
+	}
+	return def
 }
 
 // closeChoices: what the close button of the window does. quit ends
@@ -163,6 +228,14 @@ var settings = []setting{
 			c.MeasuredSpeed = n
 			return nil
 		}, get: func(c config) string { return strconv.FormatInt(c.MeasuredSpeed, 10) }},
+	{key: "window", def: "", comment: "Size of the window when it was last closed, e.g. 1240x820 or 1240x820,max for a maximised window. Written by " + appName + " itself. Empty: the default size.",
+		apply: func(c *config, v string) error {
+			if _, err := parseWindow(v); err != nil {
+				return err
+			}
+			c.Window = v
+			return nil
+		}, get: func(c config) string { return c.Window }},
 }
 
 // maxMeasuredSpeed: 100 GB/s, far beyond any line; a bigger number is a typo.

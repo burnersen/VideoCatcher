@@ -83,12 +83,21 @@ func main() {
 	logger.Info("start", "version", version)
 
 	app := NewApp(paths, logger)
+	// The window opens as large as it was when it was last closed. Where it
+	// opens is left to Windows: a saved place can be on a screen that is
+	// no longer there.
+	win := savedWindow(paths.ConfigFile)
+	startState := options.Normal
+	if win.Maximised {
+		startState = options.Maximised
+	}
 	err = wails.Run(&options.App{
-		Title:     displayName,
-		Width:     1240,
-		Height:    820,
-		MinWidth:  940,
-		MinHeight: 620,
+		Title:            displayName,
+		Width:            win.Width,
+		Height:           win.Height,
+		MinWidth:         minWindowWidth,
+		MinHeight:        minWindowHeight,
+		WindowStartState: startState,
 		// Must match --bg in style.css, or the window flashes white.
 		BackgroundColour: &options.RGBA{R: 242, G: 245, B: 246, A: 255},
 		AssetServer:      &assetserver.Options{Assets: assets},
