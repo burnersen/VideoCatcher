@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -40,6 +41,26 @@ func loginFiles(t *testing.T, q *queue) (cookies, headers string) {
 	return cookies, headers
 }
 
+// stageLog keeps what the window was told about a job. The last word of a
+// job can come a moment after the list shows it as done, so reading and
+// writing are locked.
+type stageLog struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (l *stageLog) add(j Job) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.seen = append(l.seen, j.Status+": "+j.Stage)
+}
+
+func (l *stageLog) text() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Join(l.seen, "\n")
+}
+
 // A stream link with a token the site no longer takes: the job tries the
 // page it was found on, once, with the cookies and the browser's name but
 // without what belonged to the request of the link. The user sees it
@@ -62,8 +83,8 @@ func TestRefusedLinkTriesThePage(t *testing.T) {
 	}}
 	q, _ := newTestQueue(t, r)
 	cookies, headers := loginFiles(t, q)
-	var stages []string
-	q.onChange = func(j Job) { stages = append(stages, j.Status+": "+j.Stage) } // one job: the calls come one after the other
+	stages := &stageLog{}
+	q.onChange = stages.add
 	j, err := q.AddWith("https://cdn.example/a/master.m3u8?token=old", testOptions(t), "extension", "https://player.example/e/1", "T", cookies,
 		jobExtras{PageURL: "https://paid.example/watch/1", UserAgent: "Mozilla/5.0 Test", HeaderFile: headers})
 	if err != nil {
@@ -88,7 +109,7 @@ func TestRefusedLinkTriesThePage(t *testing.T) {
 		pair(second, "--add-headers", "Referer:https://player.example/e/1") {
 		t.Errorf("second run: %v", second)
 	}
-	if seen := strings.Join(stages, "\n"); !strings.Contains(seen, "waiting: link refused, trying the page instead") || strings.Contains(seen, jobFailed) {
+	if seen := stages.text(); !strings.Contains(seen, "waiting: link refused, trying the page instead") || strings.Contains(seen, jobFailed) {
 		t.Errorf("stages:\n%s", seen)
 	}
 	for _, f := range []string{cookies, headers} {
@@ -211,8 +232,8 @@ func TestBotWallTriesAsABrowser(t *testing.T) {
 			},
 		}}
 		q, _ := newTestQueue(t, r)
-		var stages []string
-		q.onChange = func(j Job) { stages = append(stages, j.Status+": "+j.Stage) }
+		stages := &stageLog{}
+		q.onChange = stages.add
 		j, err := q.AddWith("https://cdn.example/a/master.m3u8?t=1", testOptions(t), "extension", "https://player.example/e/1", "T", "",
 			jobExtras{PageURL: "https://site.example/watch/1", UserAgent: ua})
 		if err != nil {
@@ -223,7 +244,7 @@ func TestBotWallTriesAsABrowser(t *testing.T) {
 			linkOf(runs[1]) != linkOf(runs[0]) || !pair(runs[1], "--add-headers", "Referer:https://player.example/e/1") {
 			t.Errorf("%q: runs %v", ua, runs)
 		}
-		if seen := strings.Join(stages, "\n"); !strings.Contains(seen, "waiting: site wants a browser, trying as one") || strings.Contains(seen, jobFailed) {
+		if seen := stages.text(); !strings.Contains(seen, "waiting: site wants a browser, trying as one") || strings.Contains(seen, jobFailed) {
 			t.Errorf("stages:\n%s", seen)
 		}
 	}
