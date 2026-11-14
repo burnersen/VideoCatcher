@@ -298,7 +298,7 @@ function load(api) {
       URL: { createObjectURL: (b) => { made.push(b); return "blob:https://x.net/1"; } },
     };
     const ctx = vm.createContext({
-      window: win, location: { href: "https://x.net/watch" }, URL, TextDecoder, Uint8Array, Map, Set, WeakSet, JSON, Math, Date, Proxy, Reflect,
+      window: win, location: { href: "https://x.net/watch" }, URL, TextDecoder, Uint8Array, Map, Set, WeakSet, JSON, Math, Date, Proxy, Reflect, atob,
       CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } },
       document: { dispatchEvent: (e) => events.push(e) },
     });
@@ -328,8 +328,16 @@ function load(api) {
     const notes = found().filter((d) => d.note).map((d) => d.note);
     check("page.js: the page's own calls still do their work", blobUrl === "blob:https://x.net/1" && made.length === 3 && w instanceof PageWorker && w.url.endsWith("v=secret"));
     check("page.js: a list built in memory is told as hidden and noted", found().some((d) => d.blob === true) &&
-      notes.includes("list built in memory: hls one quality, 12 s, 3 entries, first: img.net .jpg ?, key AES-128"), notes);
+      notes.includes("list built in memory: hls one quality, 12 s, 3 entries, first: img.net .jpg ?, key AES-128 at k.net (no ending) ?"), notes);
     check("page.js: MediaSource and a worker are noted", notes.includes("video fed from memory (MediaSource)") && notes.includes("Worker started: x.net .js ?"), notes);
+    // A list of qualities whose qualities are lists in memory too.
+    events.length = 0;
+    const plain = "#EXTM3U\n" + "#EXTINF:5.0,\nhttps://cdn.net/v/1080_enc/1.html\n".repeat(4) + "#EXT-X-ENDLIST\n";
+    win.URL.createObjectURL(new Blob(["#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\ndata:application/vnd.apple.mpegurl;base64," + Buffer.from(plain).toString("base64") + "\n"]));
+    await settle();
+    const nested = found().filter((d) => d.note).map((d) => d.note);
+    check("page.js: a quality written into the list itself is described", nested.join() ===
+      "list built in memory: hls master, 1 entries, first: data: -> hls one quality, 20 s, 4 entries, first: cdn.net .html, no key", nested);
     check("page.js: no key and nothing of a list in a note", notes.length === 3 && notes.every((n) => !/secret|token|EXTINF|seg-1/.test(n)), notes);
   }
 
