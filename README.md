@@ -66,7 +66,9 @@
 
 ## 🧩 Browser extension
 
-Some pages show a video without a link yt-dlp can use: the player is built by the page's scripts, often inside an embedded frame from another site, and often only after you click a play button. The extension watches what the page really loads and lists the videos it saw (HLS and DASH streams, video files) in its toolbar button.
+Some pages show a video without a link yt-dlp can use: the player is built by the page's scripts, often inside an embedded frame from another site, and often only after you click a play button. The extension watches what the page really loads and lists the videos it saw (HLS, DASH and Smooth Streaming streams, video files) in its toolbar button.
+
+It finds them in four ways, because sites hide their videos differently: by the address and type of what the page loads; by looking at the start of the answers the player gets, for streams behind an address that says nothing (`/get.php?id=5`); by the videos the page names itself, also before they are loaded; and by the embedded player's own address, which yt-dlp often knows where the page around it says nothing (listed as **PLAYER**). The best one is on top: a stream with all its qualities before a single quality (shown with its length, so the film is easy to tell from an advert), streams before files. When a video plays but the page keeps its stream out of sight, the button says so instead of "nothing found".
 
 **How to use it:** open the page, start the video (if the page offers several players or hosts, click one), then click the Video-Catcher button in the toolbar and **Download** next to the video. **Send this page** sends the address of the page itself, which is best for the sites yt-dlp knows (YouTube and many more). There is also a right-click menu for pages, links and videos. A video from the extension gets the page title as its file name, and it is downloaded with the settings of the window.
 
@@ -78,7 +80,7 @@ Some pages show a video without a link yt-dlp can use: the player is built by th
    - **Chrome and Edge:** unpack `VideoCatcher-extension-chromium.zip` into a folder that stays (for example `Documents\VideoCatcher-extension`). Open `chrome://extensions` (Edge: `edge://extensions`), turn on **Developer mode**, click **Load unpacked** and choose that folder.
 3. Click the puzzle piece in the toolbar and pin Video-Catcher. The button should say "Connected to Video-Catcher".
 
-**What it may do, and why:** see the requests of the pages (to find videos), keep a list per tab in the browser's memory until the tab or browser closes, add a right-click menu, read a site's cookies only when you tick "Send the site's login along", and talk to Video-Catcher on this PC. It sends nothing to the internet and nothing anywhere before you click. If you moved `VideoCatcher.exe`, start it once from its new place; it updates what the browsers know.
+**What it may do, and why:** see the requests of the pages and look into the pages themselves (to find videos; it reads and changes nothing on them), keep a list per tab in the browser's memory until the tab or browser closes, add a right-click menu, read a site's cookies only when you tick "Send the site's login along", and talk to Video-Catcher on this PC. It sends nothing to the internet and nothing anywhere before you click. If you moved `VideoCatcher.exe`, start it once from its new place; it updates what the browsers know. After installing or updating the extension, reload the pages that were already open.
 
 The extension cannot get around DRM, and it cannot download what a site keeps from you.
 

@@ -7,7 +7,7 @@
   "sendPage": { "message": "Diese Seite schicken" },
   "sendPageHint": { "message": "Am besten für Seiten, die yt-dlp kennt (YouTube, Vimeo, ARD und viele mehr)." },
   "found": { "message": "Gefundene Videos auf dieser Seite" },
-  "nothingFound": { "message": "Noch nichts gefunden. Starte das Video auf der Seite. Bietet die Seite mehrere Player oder Hoster an, klick einen an. Dann taucht es hier auf." },
+  "nothingFound": { "message": "Noch nichts gefunden. Starte das Video auf der Seite. Bietet die Seite mehrere Player oder Hoster an, klick einen an. Dann taucht es hier auf. War die Seite schon offen, bevor die Erweiterung installiert oder erneuert wurde, lade sie erst neu." },
   "send": { "message": "Laden" },
   "sent": { "message": "An Video-Catcher geschickt" },
   "sending": { "message": "Wird geschickt ..." },
@@ -26,5 +26,10 @@
   "kindDash": { "message": "DASH-Stream" },
   "kindVideo": { "message": "Videodatei" },
   "kindAudio": { "message": "Audiodatei" },
-  "inFrame": { "message": "von $1" }
+  "inFrame": { "message": "von $1" },
+  "kindIsm": { "message": "Smooth-Streaming-Stream" },
+  "kindEmbed": { "message": "Eingebetteter Player: seine Seite wird geschickt, für Seiten, die yt-dlp kennt" },
+  "allQualities": { "message": "alle Qualitäten" },
+  "oneQuality": { "message": "eine Qualität" },
+  "hiddenVideo": { "message": "Hier läuft ein Video, aber die Seite hält ihren Stream verborgen. Probier \"Diese Seite schicken\" oder einen Player aus der Liste unten. War die Seite schon offen, bevor die Erweiterung installiert oder erneuert wurde, lade sie neu und starte das Video noch mal." }
 }
