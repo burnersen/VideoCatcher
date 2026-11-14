@@ -11,7 +11,9 @@
 //     also before they are loaded or when they came from the cache,
 //   - that a video plays from memory (blob), so the popup can say why
 //     there is nothing to list,
-//   - that this frame holds a player: its address is worth a try.
+//   - that this frame holds a player: its address is worth a try,
+//   - what page.js noted about how the player gets its video, for the
+//     report a user can copy when nothing is found.
 //
 // It reads the page and changes nothing on it.
 (() => {
@@ -34,6 +36,7 @@
   const told = new Map(); // link -> when it was last reported
   const watched = new WeakSet(); // media inside shadow trees that have listeners
   let items = [];
+  let notes = [];
   let blob = false;
   let embed = false;
   let blobTold = false;
@@ -42,9 +45,10 @@
 
   function flush() {
     timer = null;
-    const message = { type: "vc-found", items, blob: blob && !blobTold, embed: embed && !embedTold };
+    const message = { type: "vc-found", items, notes, blob: blob && !blobTold, embed: embed && !embedTold };
     items = [];
-    if (message.items.length === 0 && !message.blob && !message.embed) return;
+    notes = [];
+    if (message.items.length === 0 && message.notes.length === 0 && !message.blob && !message.embed) return;
     blobTold = blobTold || blob;
     embedTold = embedTold || embed;
     try {
@@ -79,7 +83,11 @@
       return;
     }
     if (!d || typeof d !== "object") return;
-    if (d.blob === true) {
+    if (typeof d.note === "string") {
+      // For the report only (background.js checks it again).
+      if (notes.length < 10 && d.note.length <= 200) notes.push(d.note);
+      later();
+    } else if (d.blob === true) {
       blob = true;
       later();
     } else if (typeof d.url === "string") {

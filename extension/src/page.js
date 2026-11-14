@@ -10,7 +10,9 @@
 // an HLS list, a DASH or a Smooth Streaming manifest is one.
 //
 // It only tells content.js the link of such an answer (an event on the
-// document), nothing of its content, and makes no request of its own. The
+// document), nothing of its content, and makes no request of its own. For
+// the report a user can copy when nothing is found, it also notes in a few
+// words how the player gets its video (a list built in memory, a worker). The
 // page gets its answers unchanged; whatever goes wrong in here is
 // swallowed, so a page never breaks because of it. The page can see this
 // script and could send made-up events: that only puts a link into the
@@ -111,19 +113,6 @@
     readStart(copy).then((text) => report(url, text)).catch(() => {}); // an answer cut off: nothing found
   }
 
-  const pageFetch = window.fetch;
-  if (typeof pageFetch === "function") {
-    window.fetch = function fetch(...args) {
-      const promise = pageFetch.apply(this, args);
-      try {
-        promise.then(onResponse).catch(() => {}); // a failed request is the page's business
-      } catch (e) {
-        // Not a promise (a page that replaced fetch itself): left alone.
-      }
-      return promise;
-    };
-  }
-
   // --- XMLHttpRequest ---
 
   function onLoad() {
@@ -145,8 +134,36 @@
     }
   }
 
-  const Xhr = window.XMLHttpRequest;
-  if (Xhr && Xhr.prototype && typeof Xhr.prototype.open === "function") {
+  // --- putting it in place ---
+
+  // A player can ask for its video with the fetch of another window: a
+  // frame of its own without an address, made only for that. So the same
+  // goes into every window of this page that can be reached, at the moment
+  // the page reaches for it (watchFrames), before it can use what is in it.
+  let hooked;
+  try {
+    hooked = new WeakSet();
+  } catch (e) {
+    hooked = { has: () => false, add: () => {} };
+  }
+
+  function hookFetch(win) {
+    const pageFetch = win.fetch;
+    if (typeof pageFetch !== "function") return;
+    win.fetch = function fetch(...args) {
+      const promise = pageFetch.apply(this, args);
+      try {
+        promise.then(onResponse).catch(() => {}); // a failed request is the page's business
+      } catch (e) {
+        // Not a promise (a page that replaced fetch itself): left alone.
+      }
+      return promise;
+    };
+  }
+
+  function hookXhr(win) {
+    const Xhr = win.XMLHttpRequest;
+    if (!Xhr || !Xhr.prototype || typeof Xhr.prototype.open !== "function") return;
     const pageOpen = Xhr.prototype.open;
     Xhr.prototype.open = function open(...args) {
       try {
@@ -157,4 +174,121 @@
       return pageOpen.apply(this, args);
     };
   }
+
+  // --- notes for the report ---
+
+  // When nothing is found, the user can copy a report (popup). These notes
+  // say how the player gets its video where the requests do not show it: a
+  // list it builds in memory, a worker that does the asking. Short words
+  // about the page, never a link with its keys and nothing of an answer.
+  const noted = new Set();
+  function note(text) {
+    if (noted.size >= 30 || noted.has(text)) return;
+    noted.add(text);
+    tell({ note: text.replace(/[^\x20-\x7e]/g, "?").slice(0, 200) });
+  }
+
+  // where says of a link only its kind, its host and how its name ends.
+  function where(link) {
+    try {
+      const u = new URL(link, location.href);
+      if (!/^https?:$/.test(u.protocol)) return u.protocol;
+      const end = /\.[A-Za-z0-9]{1,6}$/.exec(u.pathname);
+      return u.host + " " + (end ? end[0] : "(no ending)") + (u.search ? " ?" : "");
+    } catch (e) {
+      return "(no link)";
+    }
+  }
+
+  // describe says what a list built in memory looks like: how many parts,
+  // and where the first one points.
+  function describe(text, found) {
+    if (found.kind !== "hls") return found.kind;
+    const lines = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+    const key = /#EXT-X-KEY:[^\n]*METHOD=([A-Z0-9-]+)/.exec(text);
+    return "hls " + (found.master ? "master" : "one quality, " + found.duration + " s") + ", " + lines.length + " entries, first: " +
+      (lines.length > 0 ? (/^[a-z][a-z0-9+.-]*:/i.test(lines[0]) ? "" : "relative ") + where(lines[0]) : "none") + (key ? ", key " + key[1] : "");
+  }
+
+  function hookNotes(win) {
+    const urls = win.URL;
+    if (urls && typeof urls.createObjectURL === "function") {
+      const pageCreate = urls.createObjectURL;
+      urls.createObjectURL = function createObjectURL(...args) {
+        try {
+          const b = args[0];
+          if (b && typeof b.slice === "function" && typeof b.size === "number") {
+            if (b.size > 0 && b.size <= maxChars && !/^(image|video|audio|font)\//.test(b.type || "")) {
+              b.slice(0, maxChars).text().then((text) => {
+                const found = inspect(text);
+                if (!found) return;
+                tell({ blob: true });
+                note("list built in memory: " + describe(text, found));
+              }).catch(() => {}); // unreadable: nothing to note
+            }
+          } else if (b) {
+            note("video fed from memory (MediaSource)");
+          }
+        } catch (e) {
+          // Whatever the page passed: its own call decides.
+        }
+        return pageCreate.apply(this, args);
+      };
+    }
+    for (const name of ["Worker", "SharedWorker"]) {
+      const Page = win[name];
+      if (typeof Page !== "function" || typeof Proxy !== "function") continue;
+      win[name] = new Proxy(Page, {
+        construct(target, args, newTarget) {
+          try {
+            note(name + " started: " + where(String(args[0])));
+          } catch (e) {
+            // A worker without a readable address.
+          }
+          return Reflect.construct(target, args, newTarget);
+        },
+      });
+    }
+  }
+
+  // watchFrames makes the page's way to another window (a frame's
+  // contentWindow or contentDocument) pass through install first.
+  function watchFrames(win) {
+    for (const name of ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"]) {
+      const proto = win[name] && win[name].prototype;
+      if (!proto) continue;
+      for (const prop of ["contentWindow", "contentDocument"]) {
+        const d = Object.getOwnPropertyDescriptor(proto, prop);
+        if (!d || typeof d.get !== "function" || d.configurable === false) continue;
+        Object.defineProperty(proto, prop, {
+          ...d,
+          get() {
+            const got = d.get.call(this);
+            try {
+              install(prop === "contentWindow" ? got : got && got.defaultView);
+            } catch (e) {
+              // A frame of another site: its own copy of this script watches it.
+            }
+            return got;
+          },
+        });
+      }
+    }
+  }
+
+  function install(win) {
+    if (!win || hooked.has(win)) return;
+    // A window of another site throws here, before anything is changed.
+    void win.fetch;
+    hooked.add(win);
+    for (const part of [hookFetch, hookXhr, hookNotes, watchFrames]) {
+      try {
+        part(win);
+      } catch (e) {
+        // A page that locked one of them: the others still go in.
+      }
+    }
+  }
+
+  install(window);
 })();

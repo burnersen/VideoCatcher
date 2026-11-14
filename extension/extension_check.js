@@ -273,6 +273,104 @@ function load(api) {
     check("page.js: the page's failed request stays the page's", rejected);
   }
 
+  // page.js and a player that goes around it: the fetch of a frame of its
+  // own, a list built in memory, a worker. The first is watched like the
+  // page's own, the others are noted for the report in a few words.
+  {
+    const events = [];
+    const list = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://k.net/key?secret=1\"\n" + "#EXTINF:4.0,\nhttps://img.net/a/seg-1.jpg?token=secret\n".repeat(3) + "#EXT-X-ENDLIST\n";
+    const frameFetch = async (url) => {
+      const r = new Response("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nlow.m3u8\n", { headers: { "content-type": "text/plain" } });
+      Object.defineProperty(r, "url", { value: url });
+      const clone = r.clone.bind(r);
+      r.clone = () => { const c = clone(); Object.defineProperty(c, "url", { value: url }); return c; };
+      return r;
+    };
+    const inner = { fetch: frameFetch };
+    const foreign = new Proxy({}, { get() { throw new Error("SecurityError"); } });
+    class Frame { }
+    Object.defineProperty(Frame.prototype, "contentWindow", { configurable: true, get() { return this.win; } });
+    Object.defineProperty(Frame.prototype, "contentDocument", { configurable: true, get() { return this.win === foreign ? null : { defaultView: this.win }; } });
+    class PageWorker { constructor(url) { this.url = url; } }
+    const made = [];
+    const win = {
+      fetch: frameFetch, HTMLIFrameElement: Frame, Worker: PageWorker,
+      URL: { createObjectURL: (b) => { made.push(b); return "blob:https://x.net/1"; } },
+    };
+    const ctx = vm.createContext({
+      window: win, location: { href: "https://x.net/watch" }, URL, TextDecoder, Uint8Array, Map, Set, WeakSet, JSON, Math, Date, Proxy, Reflect,
+      CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } },
+      document: { dispatchEvent: (e) => events.push(e) },
+    });
+    vm.runInContext(fs.readFileSync(path.join(src, "page.js"), "utf8"), ctx, { filename: "page.js" });
+    const settle = () => new Promise((r) => setTimeout(r, 20));
+    const found = () => events.map((e) => JSON.parse(e.detail));
+
+    const frame = new Frame();
+    frame.win = inner;
+    await frame.contentWindow.fetch("https://x.net/hidden/1");
+    await settle();
+    check("page.js: the fetch of the player's own frame is watched too", found().some((d) => d.url === "https://x.net/hidden/1" && d.master === true), found());
+    const before = inner.fetch;
+    check("page.js: a frame is prepared once", frame.contentDocument.defaultView === inner && inner.fetch === before);
+    const other = new Frame();
+    other.win = foreign;
+    let threw = false;
+    try { if (other.contentWindow !== foreign || other.contentDocument !== null) threw = true; } catch (e) { threw = true; }
+    check("page.js: a frame of another site is handed over untouched", !threw);
+
+    events.length = 0;
+    const blobUrl = win.URL.createObjectURL(new Blob([list], { type: "application/vnd.apple.mpegurl" }));
+    win.URL.createObjectURL({ readyState: "closed" });
+    win.URL.createObjectURL(new Blob(["<html></html>"]));
+    const w = new win.Worker("https://x.net/js/hls.worker.js?v=secret");
+    await settle();
+    const notes = found().filter((d) => d.note).map((d) => d.note);
+    check("page.js: the page's own calls still do their work", blobUrl === "blob:https://x.net/1" && made.length === 3 && w instanceof PageWorker && w.url.endsWith("v=secret"));
+    check("page.js: a list built in memory is told as hidden and noted", found().some((d) => d.blob === true) &&
+      notes.includes("list built in memory: hls one quality, 12 s, 3 entries, first: img.net .jpg ?, key AES-128"), notes);
+    check("page.js: MediaSource and a worker are noted", notes.includes("video fed from memory (MediaSource)") && notes.includes("Worker started: x.net .js ?"), notes);
+    check("page.js: no key and nothing of a list in a note", notes.length === 3 && notes.every((n) => !/secret|token|EXTINF|seg-1/.test(n)), notes);
+  }
+
+  // The report a user copies when nothing is found: links are shortened so
+  // that no key and no link that still works leaves the browser.
+  {
+    const long = "https://s2.cdn.example/hls2/02/00036/in2vevq7rmz6_n/master.m3u8?t=t-MA46CPldaug6qvij-gC3HXGo17H31Cf0Plt5nKpGg&s=1794681068&e=43200";
+    check("brief: values behind the ? become lengths", vc.brief(long) === "https://s2.cdn.example/hls2/02/00036/in2vevq7rmz6_n/master.m3u8?t=<43>&s=<10>&e=<5>", vc.brief(long));
+    check("brief: a long name in the path becomes its length", vc.brief("https://x.net/v/581c2ccb2333cbefb5909c5b06953f60/seg.jpg") === "https://x.net/v/<32>/seg.jpg" &&
+      vc.brief("https://x.net/581c2ccb2333cbefb5909c5b06953f60.m3u8") === "https://x.net/<32>.m3u8");
+    check("brief: no web link says only its kind", vc.brief("blob:https://x.net/1-2") === "blob:" && vc.brief("nonsense") === "(no link)");
+    const line = vc.traceLine({ type: "xmlhttprequest", statusCode: 200, frameId: 3, url: "https://x.net/player/xs1.php?data=abcdef",
+      responseHeaders: h({ "Content-Type": "text/html; charset=utf-8", "Content-Length": "5120" }) });
+    check("trace line", line === "xmlhttprequest 200 text/html 5120 frame https://x.net/player/xs1.php?data=<6>", line);
+    const notes = vc.pageNotes({ notes: ["Worker started: x.net .js", 5, "a\nb", "x".repeat(201), "ok"] });
+    check("notes of a page: short plain text only", notes.join("|") === "Worker started: x.net .js|ok", notes);
+    const report = vc.reportText({ version: "1.2.3", browser: "UA", pageUrl: "https://site.example/watch?id=secret", blob: true,
+      items: [{ url: "https://p.example/player/index.php?data=secret", kind: "embed", via: "dom" }], notes, requests: [line] });
+    check("report: page, finds, notes, requests, no keys", /page https:\/\/site\.example\/watch\?id=<6>/.test(report) && /video from memory: yes/.test(report) &&
+      /embed dom https:\/\/p\.example\/player\/index\.php\?data=<6>/.test(report) && report.includes("  ok\n") && report.includes("  " + line + "\n") && !/secret/.test(report), report);
+  }
+
+  // What goes along without the tick: the proof of a bot check, never a
+  // login, and with it the browser's name.
+  {
+    const cookie = (name) => ({ domain: ".site.example", path: "/", name, value: "v", session: true });
+    const mk = (cookies) => {
+      const c = vm.createContext({ URL, console, navigator: { userAgent: "Mozilla/5.0 Browser" }, chrome: { cookies: { getAll: async () => cookies } } });
+      vm.runInContext(fs.readFileSync(path.join(src, "common.js"), "utf8"), c, { filename: "common.js" });
+      return c.vc;
+    };
+    const t = { url: "https://site.example/watch/1", title: "T" };
+    const some = mk([cookie("sid"), cookie("cf_clearance"), cookie("__cf_bm"), cookie("__ddg1_"), cookie("auth_token")]);
+    const m = await some.withPass(some.buildMessage(t, null), t, null);
+    check("pass: only the proof of the bot check", ["cf_clearance", "__cf_bm", "__ddg1_"].every((n) => m.cookies.includes("\t" + n + "\t")) && !/sid|auth_token/.test(m.cookies), m.cookies);
+    check("pass: with the browser's name", m.headers["User-Agent"] === "Mozilla/5.0 Browser", m.headers);
+    const none = mk([cookie("sid")]);
+    const m2 = await none.withPass(none.buildMessage(t, null), t, null);
+    check("pass: no bot check, nothing added", m2.cookies === undefined && JSON.stringify(m2.headers) === "{}", m2);
+  }
+
   // content.js, next to the pages: the videos a page names, what page.js
   // found, a video from memory, a player in a frame.
   {
@@ -311,10 +409,12 @@ function load(api) {
     const events = [
       JSON.stringify({ url: "https://cdn.net/get?id=1", kind: "hls", master: true, duration: 0 }),
       JSON.stringify({ blob: true }), "not json", { url: "https://cdn.net/object" }, "x".repeat(9000), "null",
+      JSON.stringify({ note: "Worker started: x.net .js" }), JSON.stringify({ note: "y".repeat(300) }),
     ];
     const sent = await run(false, elements, events);
     const all = sent.flatMap((m) => m.items);
     check("content.js: one message for what it found", sent.length === 1 && sent[0].type === "vc-found", sent);
+    check("content.js: a short note of page.js goes along", JSON.stringify(sent[0].notes) === '["Worker started: x.net .js"]', sent[0].notes);
     check("content.js: the stream from page.js", all.some((x) => x.url === "https://cdn.net/get?id=1" && x.via === "sniff" && x.master === true), all);
     check("content.js: videos named by the page, each once", all.filter((x) => x.via === "dom").map((x) => x.url.split("/").pop() + ":" + x.kind).sort().join(" ") === "film.mp4:video film.webm:video talk.mp3:audio", all);
     check("content.js: a video from memory and a player in a frame", sent[0].blob === true && sent[0].embed === true, sent);

@@ -381,12 +381,13 @@
 
   // cookiesFor collects the cookies for the given links (the video, the
   // page, the player's frame) in the Netscape format, from the cookie store
-  // of the tab.
-  async function cookiesFor(urls, tab) {
+  // of the tab; with "only", just the ones it says yes to.
+  async function cookiesFor(urls, tab, only) {
     const all = [];
     const storeId = await storeOf(tab);
     for (const url of new Set(urls.filter((u) => /^https?:/i.test(u || "")))) {
-      all.push(...(await cookiesOf(url, storeId)));
+      const got = await cookiesOf(url, storeId);
+      all.push(...(only ? got.filter(only) : got));
     }
     return all.length > 0 ? netscapeCookies(all) : "";
   }
@@ -402,6 +403,85 @@
     const has = Object.keys(message.headers || {}).some((k) => k.toLowerCase() === "user-agent");
     if (ua && !has) message.headers = { ...message.headers, "User-Agent": ua };
     return message;
+  }
+
+  // Cookies that are no login: the proof a bot wall (Cloudflare,
+  // DDoS-Guard) hands a browser it let in. Without it, the same wall turns
+  // Video-Catcher away, whatever link it comes with.
+  const passCookie = /^(cf_clearance|__cf_bm|_cfuvid|__cflb|__ddg[0-9a-z_]*)$/i;
+
+  // withPass adds that proof to a message, and the browser's name, because
+  // the proof is only good for the browser it was given to. It is what goes
+  // along when the user did not ask for the login; logins stay behind.
+  async function withPass(message, tab, item) {
+    const urls = [message.url, tab && tab.url, item && item.frameUrl, item && item.referer];
+    const text = await cookiesFor(urls, tab, (c) => passCookie.test(c.name));
+    if (!text) return message;
+    message.cookies = text;
+    const ua = globalThis.navigator && globalThis.navigator.userAgent;
+    const has = Object.keys(message.headers || {}).some((k) => k.toLowerCase() === "user-agent");
+    if (ua && !has) message.headers = { ...message.headers, "User-Agent": ua };
+    return message;
+  }
+
+  // --- the report for a page whose video is not found ---
+
+  // brief shortens a link for the report: host and path stay, what looks
+  // like a key (the values behind the "?", long runs of letters and digits)
+  // becomes its length. A report is pasted into an issue for everyone to
+  // read; it must not hold a login or a link that still works.
+  function brief(url) {
+    let u;
+    try {
+      u = new URL(url);
+    } catch (e) {
+      return "(no link)";
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return u.protocol;
+    const path = u.pathname.split("/").map((p) => {
+      const dot = p.lastIndexOf(".");
+      const name = dot > 0 ? p.slice(0, dot) : p;
+      const end = dot > 0 ? p.slice(dot).slice(0, 8) : "";
+      return name.length >= 20 || /^[0-9a-f]{12,}$/i.test(name) ? "<" + name.length + ">" + end : p;
+    }).join("/").slice(0, 120);
+    const keys = [...u.searchParams.entries()].slice(0, 8).map(([k, v]) => k.slice(0, 20) + "=<" + v.length + ">").join("&");
+    return u.origin + path + (keys ? "?" + keys : "");
+  }
+
+  const maxTrace = 300;
+  const maxNotes = 40;
+
+  // traceLine is one request of a tab for the report: what kind, how it
+  // ended, what the server called it, how big, and the shortened link.
+  function traceLine(details) {
+    const type = header(details.responseHeaders, "content-type").split(";")[0].trim().slice(0, 40) || "-";
+    return [details.type, details.statusCode || 0, type, totalSize(details.responseHeaders) || "-",
+      details.frameId > 0 ? "frame" : "top", brief(details.url)].join(" ");
+  }
+
+  // pageNotes reads what page.js noted about a player (a worker, a list
+  // built in memory). It comes out of a web page: short plain text only.
+  function pageNotes(message) {
+    const out = [];
+    for (const n of Array.isArray(message.notes) ? message.notes.slice(0, 10) : []) {
+      if (typeof n === "string" && n.length <= 200 && /^[\x20-\x7e]+$/.test(n)) out.push(n);
+    }
+    return out;
+  }
+
+  // reportText is what "Copy a report" puts on the clipboard.
+  function reportText(info) {
+    const lines = ["Video-Catcher extension report", "extension " + (info.version || "?") + ", " + (info.browser || "?"),
+      "page " + brief(info.pageUrl || ""), "video from memory: " + (info.blob ? "yes" : "no"), "", "found (" + (info.items || []).length + "):"];
+    for (const x of info.items || []) {
+      lines.push("  " + [x.kind, x.via || "net", x.master === true ? "master" : x.master === false ? "one" : "", brief(x.url),
+        x.frameUrl ? "in " + brief(x.frameUrl) : ""].filter(Boolean).join(" "));
+    }
+    lines.push("", "the player (" + (info.notes || []).length + "):");
+    for (const n of info.notes || []) lines.push("  " + n);
+    lines.push("", "requests (" + (info.requests || []).length + ", newest last):");
+    for (const r of info.requests || []) lines.push("  " + r);
+    return lines.join("\n") + "\n";
   }
 
   // buildMessage makes the "add" message for a found video or for the page.
@@ -426,6 +506,6 @@
   globalThis.vc = {
     api, nativeHost, maxItemsPerTab, classify, totalSize, header, netscapeCookies, hostOf, shortPath,
     formatSize, formatDuration, addItem, rank, kindOfUrl, pageItems, sendToApp, cookiesFor, withLogin, buildMessage,
-    sentHeaders,
+    sentHeaders, withPass, brief, traceLine, pageNotes, reportText, maxTrace, maxNotes,
   };
 })();

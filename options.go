@@ -282,6 +282,9 @@ type jobPaths struct {
 	Cookies string // a cookie file for this job, or empty
 	Headers string // a file with request headers from the browser (headers.go), or empty
 	Proxy   string // VideoCatcher's own relay for the speed limit (speed.go), or empty
+	// Impersonate is the browser yt-dlp answers like ("chrome", "firefox"),
+	// for sites that turn away everything else; empty for yt-dlp as itself.
+	Impersonate string
 }
 
 // buildArgs turns the options into yt-dlp's argument list. The link comes
@@ -406,5 +409,20 @@ func buildArgs(o DownloadOptions, link string, ts toolSet, have func(tool string
 	if jp.Proxy != "" {
 		a = append(a, "--proxy", jp.Proxy)
 	}
+	if jp.Impersonate != "" {
+		a = append(a, "--impersonate", jp.Impersonate)
+	}
 	return append(a, "--", link)
+}
+
+// browserTarget names the browser yt-dlp answers like, by the browser the
+// link comes from: what a site handed that browser (a cookie that says "this
+// visitor passed the check") is only good for one that looks the same.
+// Chrome, Edge and the others built on Chromium look alike here; a link
+// without a browser (typed into the window) goes as Chrome.
+func browserTarget(userAgent string) string {
+	if strings.Contains(userAgent, "Firefox/") {
+		return "firefox"
+	}
+	return "chrome"
 }

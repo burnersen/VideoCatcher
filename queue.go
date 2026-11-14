@@ -87,6 +87,15 @@ type Job struct {
 	PageURL   string `json:"pageUrl,omitempty"`
 	UserAgent string `json:"userAgent,omitempty"`
 	ViaPage   bool   `json:"viaPage,omitempty"`
+	// AsBrowser: the site turned yt-dlp away where it lets a browser in (a
+	// bot wall like Cloudflare's, or a plain 403). The job then runs once
+	// more with yt-dlp answering like a browser (--impersonate). NoBrowser:
+	// this yt-dlp cannot do that, so it is not asked again.
+	AsBrowser bool `json:"asBrowser,omitempty"`
+	NoBrowser bool `json:"noBrowser,omitempty"`
+
+	follow string   // set for a try the job starts by itself: what it tries; the details of the tries before stay
+	before []string // yt-dlp's error lines of those tries, for the message at the end
 
 	cookieFile string // from the browser extension; deleted when the job ends
 	headerFile string // the same, for the request headers
@@ -436,7 +445,14 @@ func (q *queue) Schedule() {
 func (q *queue) startLocked(j *Job) {
 	ctx, cancel := context.WithCancel(context.Background())
 	q.cancel[j.ID] = cancel
-	j.Status, j.Stage, j.Started, j.Error, j.Details = jobRunning, "starting yt-dlp", time.Now(), "", []string{}
+	j.Status, j.Stage, j.Started, j.Error = jobRunning, "starting yt-dlp", time.Now(), ""
+	if j.follow != "" {
+		// A try of the job's own: what yt-dlp said before stays readable.
+		j.Details = append(j.Details, "Next try: "+j.follow)
+		j.follow = ""
+	} else {
+		j.Details, j.before = []string{}, nil
+	}
 	j.Speed, j.ETA, j.Files, j.Next, j.RetryAt = 0, -1, []string{}, false, time.Time{}
 	j.Size, j.Skipped = 0, 0
 	if j.Resumable {
@@ -467,6 +483,9 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 		// browser) still counts, what belonged to the request of the link
 		// does not.
 		link, referer, jp.Headers = j.PageURL, "", ""
+	}
+	if j.AsBrowser && !j.NoBrowser {
+		jp.Impersonate = browserTarget(j.UserAgent)
 	}
 	args := buildArgs(j.Options, link, q.ts, q.have, jp, referer, j.UserAgent)
 	q.logger.Info("download started", "id", id, "host", hostOf(j.URL))
@@ -679,6 +698,7 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		wait := q.delays[j.Tries]
 		j.Tries++
 		j.Status, j.Stage, j.Resumable, j.RetryAt = jobWaiting, "site not reached, trying again soon", true, time.Now().Add(wait)
+		j.follow, j.before = "the same again", append(j.before, errLines...)
 		q.logger.Warn("download tries again", "id", id, "host", hostOf(j.URL), "try", j.Tries, "in", wait.String(), "ytdlp", firstLine(strings.Join(errLines, "\n")))
 		q.saveLocked()
 		c := copyJob(j)
@@ -687,12 +707,36 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		q.Schedule()
 		return
 	}
-	if err != nil && ctx.Err() == nil && !j.ViaPage && j.PageURL != "" && len(j.Files) == 0 && linkRefused(errLines) {
+	failed := err != nil && ctx.Err() == nil && len(j.Files) == 0
+	if failed && j.AsBrowser && !j.NoBrowser && cannotImpersonate(errLines) {
+		// This yt-dlp has nothing to answer like a browser with. The try
+		// did not reach the site, so what the site said before counts.
+		j.NoBrowser = true
+		q.logger.Warn("yt-dlp cannot act as a browser", "id", id, "ytdlp", firstLine(strings.Join(errLines, "\n")))
+		errLines = append([]string{}, j.before...)
+	}
+	if failed && !j.AsBrowser && wantsBrowser(errLines) {
+		// The site lets browsers in and turned yt-dlp away: once more,
+		// answering like the browser the link comes from. Same link, same
+		// login.
+		j.AsBrowser, j.Tries = true, 0
+		j.Status, j.Stage, j.Resumable = jobWaiting, "site wants a browser, trying as one", false
+		j.follow, j.before = "as a browser", append(j.before, errLines...)
+		q.logger.Warn("download tries as a browser", "id", id, "host", hostOf(j.URL), "ytdlp", firstLine(strings.Join(errLines, "\n")))
+		q.saveLocked()
+		c := copyJob(j)
+		q.mu.Unlock()
+		q.notify(c)
+		q.Schedule()
+		return
+	}
+	if failed && !j.ViaPage && j.PageURL != "" && linkRefused(errLines) {
 		// A link with a token that is no longer good (it waited too long,
 		// or it was made for the player alone): the page it was found on
 		// is tried instead, once, with the same login.
 		j.ViaPage, j.Tries = true, 0
 		j.Status, j.Stage, j.Resumable = jobWaiting, "link refused, trying the page instead", false
+		j.follow, j.before = "the page the video was found on", append(j.before, errLines...)
 		q.logger.Warn("download tries the page instead", "id", id, "host", hostOf(j.URL), "page", hostOf(j.PageURL), "ytdlp", firstLine(strings.Join(errLines, "\n")))
 		q.saveLocked()
 		c := copyJob(j)
@@ -722,8 +766,8 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		var ue *UserError
 		if errors.As(err, &ue) && len(errLines) == 0 {
 			uerr = err // our own error (folder, start of yt-dlp), already explained
-		} else if j.ViaPage {
-			uerr = explainExpired(errLines, err)
+		} else {
+			uerr = explainEnd(j.before, errLines, err, j.ViaPage, j.NoBrowser)
 		}
 		j.Status, j.Stage, j.Error = jobFailed, "failed", errorText(uerr)
 		q.logger.Error("download failed", "id", id, "host", hostOf(j.URL), "err", err, "ytdlp", firstLine(strings.Join(errLines, "\n")))
@@ -884,6 +928,7 @@ func (q *queue) Retry(id string) error {
 func (q *queue) againLocked(j *Job) {
 	j.Status, j.Stage, j.Error, j.Percent, j.Done, j.Total = jobWaiting, "waiting", "", 0, 0, 0
 	j.Tries, j.RetryAt, j.Elapsed, j.Size, j.Skipped = 0, time.Time{}, 0, 0, 0
+	j.follow, j.before = "", nil
 	q.dropPartsLocked(j) // a new try starts clean
 }
 

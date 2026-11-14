@@ -12,7 +12,7 @@
   "sent": { "message": "Sent to Video-Catcher" },
   "sending": { "message": "Sending ..." },
   "withCookies": { "message": "Send the site's login (cookies) along" },
-  "withCookiesHint": { "message": "Only for videos you can watch only when logged in. The cookies go to Video-Catcher on this PC and nowhere else." },
+  "withCookiesHint": { "message": "Only for videos you can only watch when logged in. The cookies go to Video-Catcher on this PC and nowhere else. Without the tick, only the proof that a site's bot check (Cloudflare) let your browser in goes along." },
   "connected": { "message": "Connected to Video-Catcher $1" },
   "notConnected": { "message": "Video-Catcher is not connected. In Video-Catcher, open Settings and turn on \"Allow the browser extension\". Video-Catcher must be version 0.2.0 or newer." },
   "allowSites": { "message": "Allow access to all sites" },
@@ -28,8 +28,12 @@
   "kindAudio": { "message": "Audio file" },
   "inFrame": { "message": "from $1" },
   "kindIsm": { "message": "Smooth Streaming stream" },
-  "kindEmbed": { "message": "Embedded player: its page is sent, for the sites yt-dlp knows" },
+  "kindEmbed": { "message": "Embedded player: its page is sent. That only works for sites yt-dlp knows; a stream from the list is the better choice" },
   "allQualities": { "message": "all qualities" },
   "oneQuality": { "message": "one quality" },
-  "hiddenVideo": { "message": "A video is playing here, but the page keeps its stream out of sight. Try \"Send this page\", or a player listed below. If you opened the page before the extension was installed or updated, reload it and start the video again." }
+  "hiddenVideo": { "message": "A video is playing here, but the page keeps its stream out of sight. \"Send this page\" or a player listed below only work for sites yt-dlp knows. If you opened the page before the extension was installed or updated, reload it and start the video again. Still nothing? Use \"Copy a report\" below." },
+  "report": { "message": "Copy a report" },
+  "reportHint": { "message": "Video not found? Play it, then copy the report and add it to an issue. Links in it are shortened, logins are left out." },
+  "reportCopied": { "message": "Copied. Paste it into your issue." },
+  "reportFailed": { "message": "The report could not be copied. Reload the page, play the video and try again." }
 }

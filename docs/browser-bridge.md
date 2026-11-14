@@ -124,7 +124,7 @@ The file holds, in version 1:
 | `pageUrl`, `title`, `referer` | Optional. The title is shown in the list, the referer is sent with the download (some sites need it for streams). When the site refuses `url` (see "Links with a token" below), `pageUrl` is tried instead. |
 | `fileName` | Optional. A name for the file without ending; characters Windows does not allow become spaces. The extension sends the page title for streams, whose links have no name of their own. Not used for a whole playlist. |
 | `source` | `extension` starts the download like a link from the window. Anything else waits for the user's OK. |
-| `cookies` | Optional. The cookies of the site in the Netscape cookie file format, for videos you only see when logged in. |
+| `cookies` | Optional. The cookies of the site in the Netscape cookie file format, for videos you only see when logged in. Without that option, only the proof of a bot check (see "Sites behind a bot check" below). |
 | `headers` | Optional. Request headers the browser sent for the video, name to value (see below). Added in 0.6.0; older versions ignore the field. |
 
 **Cookies** are logins. VideoCatcher writes them into a file of its own for
@@ -169,6 +169,48 @@ download through:
    trying the page instead". If the page does not work either, the download
    fails with "The site no longer accepts the link of this video": send it
    again from the browser, and it starts with a fresh link.
+
+### Sites behind a bot check
+
+Many sites sit behind a wall (mostly Cloudflare) that looks at who is asking
+and lets only browsers in. yt-dlp then gets "HTTP Error 403", whatever the
+link. Three things help such a download through, in this order:
+
+1. **The proof that you got in.** The wall hands a browser it let in a
+   cookie that says so (`cf_clearance`, `__cf_bm`, `_cfuvid`, `__cflb`, and
+   DDoS-Guard's `__ddg...`). The extension sends these cookies with every
+   video and page, also without "Send the site's login along", together with
+   the `User-Agent`: the proof is only good for the browser it was given to.
+   They are no login; all other cookies stay in the browser unless the
+   option is ticked. The list is `passCookie` in `common.js`.
+2. **Answering like a browser.** When yt-dlp is turned away with a 403 or
+   the wall is named in its error, the download runs once more with
+   `--impersonate chrome` (or `firefox`, by the `User-Agent` of the browser
+   the link came from): yt-dlp then answers the way that browser does. The
+   list says "site wants a browser, trying as one". Same link, same cookies,
+   same headers. This comes before "the page instead" above, and the page is
+   then tried the same way.
+3. **A clear word at the end.** If the wall stays shut, the download fails
+   with "The site checks for a real browser and did not let Video-Catcher
+   in", and "What yt-dlp said" keeps the lines of every try. A yt-dlp build
+   without the part for this (possible on Windows on ARM) is told apart:
+   "The site wants a real browser, and this yt-dlp cannot answer like one".
+
+### When a video is not found
+
+"Copy a report" in the extension's window puts on the clipboard what the
+extension saw on the page, for an issue: the videos it found, the last 300
+requests of the tab (kind, status, type, size, top or frame) and a few notes
+of `page.js` on how the player gets its video (a list it builds in memory, a
+worker that does the asking, a video fed from memory). Links are shortened
+by `brief` in `common.js`: host and path stay, every value behind the `?`
+and every long name in the path becomes its length. No cookie, no header and
+nothing of an answer is in it. The requests are kept in memory only, never
+stored, and are gone when the tab closes or goes to another page.
+
+`page.js` also watches the `fetch` and `XMLHttpRequest` of the frames a page
+makes for itself: a player can ask for its video with the functions of an
+empty frame to get around a page script like this one.
 
 None of this gets around DRM, and none of it shows a video the login in the
 browser cannot play.

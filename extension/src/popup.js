@@ -7,7 +7,7 @@
 // as text (textContent), never as markup.
 "use strict";
 
-const { api, sendToApp, withLogin, buildMessage, hostOf, shortPath, formatSize, formatDuration } = globalThis.vc;
+const { api, sendToApp, withLogin, withPass, buildMessage, hostOf, shortPath, formatSize, formatDuration } = globalThis.vc;
 
 const msg = (key, ...subs) => api.i18n.getMessage(key, subs.map(String)) || key;
 const $ = (id) => document.getElementById(id);
@@ -63,6 +63,7 @@ const popup = {
     resultEl.textContent = msg("sending");
     const m = buildMessage(this.tab, item);
     if ($("with-cookies").checked) await withLogin(m, this.tab, item);
+    else await withPass(m, this.tab, item);
     const reply = await sendToApp(m);
     this.showResult(resultEl, reply);
     button.disabled = reply.ok;
@@ -126,6 +127,25 @@ const popup = {
     for (const item of items) list.append(this.itemRow(item));
   },
 
+  // copyReport puts what the extension saw on this page on the clipboard,
+  // with the links shortened, for an issue about a video it did not find.
+  async copyReport() {
+    const out = $("report-result");
+    out.hidden = false;
+    let ok = false;
+    try {
+      const reply = await api.runtime.sendMessage({ type: "vc-report", tabId: this.tab.id, pageUrl: this.tab.url || "" });
+      if (reply && reply.text) {
+        await navigator.clipboard.writeText(reply.text);
+        ok = true;
+      }
+    } catch (e) {
+      // No answer or no clipboard: said below.
+    }
+    out.className = "result " + (ok ? "ok" : "bad");
+    out.textContent = msg(ok ? "reportCopied" : "reportFailed");
+  },
+
   async start() {
     this.texts();
     this.tab = await this.currentTab();
@@ -139,6 +159,8 @@ const popup = {
       const ok = await api.permissions.request({ origins: ["<all_urls>"] });
       $("need-access").hidden = ok;
     });
+    $("report").disabled = !this.tab;
+    $("report").addEventListener("click", () => this.copyReport());
     $("clear").addEventListener("click", async () => {
       if (!this.tab) return;
       await api.storage.session.remove("tab:" + this.tab.id);
