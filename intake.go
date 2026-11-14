@@ -84,10 +84,12 @@ type intake struct {
 	inbox   string // request files of the browser helper
 	cookies string // cookie and header files for yt-dlp, one of each per job
 	logger  *slog.Logger
+	// peek reads the start of a part of a list (peekPart); nil: no look.
+	peek func(link, referer, userAgent string) []byte
 }
 
 func newIntake(dataDir string, logger *slog.Logger) *intake {
-	return &intake{inbox: filepath.Join(dataDir, "inbox"), cookies: filepath.Join(dataDir, "cookies"), logger: logger}
+	return &intake{inbox: filepath.Join(dataDir, "inbox"), cookies: filepath.Join(dataDir, "cookies"), logger: logger, peek: peekPart}
 }
 
 // handleArgs reads the arguments of a start (this one or a second one).
@@ -175,6 +177,12 @@ func (in *intake) readRequest(name string) (intakeRequest, error) {
 	if req.List != "" {
 		files, lerr := writeList(req.List, req.URL, in.writeSecret)
 		req.List = ""
+		if lerr == nil && in.peek != nil {
+			// A look at the first part saves loading all of them for nothing.
+			if part := firstOpenPart(files); part != "" && looksLocked(in.peek(part, req.URL, req.UserAgent)) {
+				lerr = errListLocked
+			}
+		}
 		if lerr != nil {
 			// Without its list the request is only the page of a player,
 			// which is what did not work before: it ends here, with a word.
@@ -189,6 +197,9 @@ func (in *intake) readRequest(name string) (intakeRequest, error) {
 			if errors.Is(lerr, errListKey) {
 				req.Problem = userError(lerr, "The site keeps the key of this video in its player",
 					"The parts of the video are locked, and the key never leaves the player. Video-Catcher does not take it from there.")
+			}
+			if errors.Is(lerr, errListLocked) {
+				req.Problem = userError(lerr, lockedMsg, lockedHint)
 			}
 			return req, nil
 		}
