@@ -795,6 +795,10 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		} else {
 			uerr = explainEnd(j.before, errLines, err, j.ViaPage, j.NoBrowser)
 		}
+		if said := strings.Join(errLines, "\n"); len(j.ListNames) > 0 && strings.Contains(strings.ToLower(said), "invalid data found") {
+			// All parts came, but they are not video: locked by the player.
+			uerr = userError(errors.New(said), lockedMsg, lockedHint)
+		}
 		j.Status, j.Stage, j.Error = jobFailed, "failed", errorText(uerr)
 		q.logger.Error("download failed", "id", id, "host", hostOf(j.URL), "err", err, "ytdlp", firstLine(strings.Join(errLines, "\n")))
 	default:

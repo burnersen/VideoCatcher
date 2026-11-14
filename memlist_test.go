@@ -268,3 +268,45 @@ func TestRequestWithListFromMemory(t *testing.T) {
 		}
 	}
 }
+
+func TestLooksLocked(t *testing.T) {
+	ts := make([]byte, 1024)
+	for i := 0; i < len(ts); i += 188 {
+		ts[i] = 0x47
+	}
+	mp4 := append([]byte{0, 0, 0, 24, 's', 't', 'y', 'p'}, make([]byte, 1000)...)
+	noise := make([]byte, 1024)
+	for i := range noise {
+		noise[i] = byte(i*7 + 13)
+	}
+	page := append([]byte("<html>"), noise...)
+	for name, c := range map[string]struct {
+		b    []byte
+		want bool
+	}{"ts": {ts, false}, "ts after a fake header": {append([]byte("\x89PNG\r\n"), ts...), false}, "mp4": {mp4, false},
+		"page": {page, false}, "short": {noise[:100], false}, "nothing": {nil, false}, "noise": {noise, true}} {
+		if got := looksLocked(c.b); got != c.want {
+			t.Errorf("%s: got %v", name, got)
+		}
+	}
+}
+
+func TestFirstOpenPart(t *testing.T) {
+	dir := t.TempDir()
+	put := func(name, text string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	master := put("l-1.m3u8", "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nfile:///x/l-2.m3u8\n")
+	open := put("l-2.m3u8", "#EXTM3U\n#EXTINF:4,\nhttps://cdn.example/1.html\n")
+	keyed := put("l-3.m3u8", "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://cdn.example/k\"\nhttps://cdn.example/2.ts\n")
+	if got := firstOpenPart([]string{master, open}); got != "https://cdn.example/1.html" {
+		t.Fatalf("got %q", got)
+	}
+	if got := firstOpenPart([]string{master, keyed}); got != "" {
+		t.Fatalf("a list with a key is yt-dlp's: got %q", got)
+	}
+}

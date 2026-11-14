@@ -21,13 +21,18 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -212,4 +217,86 @@ func fileURL(p string) string {
 		p = "/" + p // "C:/Users/..." becomes "/C:/Users/..."
 	}
 	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
+// errListLocked: the parts are scrambled in a way the list does not tell,
+// and only the player of the site can undo it.
+var errListLocked = errors.New("the parts of this stream are locked by the player")
+
+const (
+	lockedMsg  = "The parts of this video are locked"
+	lockedHint = "The site scrambles the parts and hands the key only to its own player. Video-Catcher does not take it from there, so this video cannot be downloaded."
+	peekBytes  = 4096
+	peekTime   = 8 * time.Second
+)
+
+// firstOpenPart is the first part of a written list that says its parts
+// are not locked, or "". Lists with a key are left to yt-dlp.
+func firstOpenPart(files []string) string {
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil || !strings.HasSuffix(f, ".m3u8") {
+			continue
+		}
+		t := string(b)
+		if strings.Contains(t, "#EXT-X-STREAM-INF") || strings.Contains(t, "#EXT-X-KEY") || strings.Contains(t, "#EXT-X-MAP") {
+			continue
+		}
+		for _, line := range strings.Split(t, "\n") {
+			if line = strings.TrimSpace(line); strings.HasPrefix(line, "http") {
+				return line
+			}
+		}
+	}
+	return ""
+}
+
+// peekPart reads the start of a part the way the player asks for it. Any
+// trouble gives nil: then yt-dlp simply tries.
+func peekPart(link, referer, userAgent string) []byte {
+	ctx, cancel := context.WithTimeout(context.Background(), peekTime)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+	if err != nil {
+		return nil
+	}
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, peekBytes))
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// looksLocked says that the start of a part is certainly not video: no
+// MPEG-TS packets, no MP4 box, no audio. Too little data, or a page of
+// text (an error of the server), is not enough to say so.
+func looksLocked(b []byte) bool {
+	if len(b) < 3*188 || bytes.HasPrefix(bytes.TrimLeft(b[:16], " \r\n\t\xef\xbb\xbf"), []byte("<")) {
+		return false
+	}
+	for i := 0; i+376 < len(b); i++ {
+		if b[i] == 0x47 && b[i+188] == 0x47 && b[i+376] == 0x47 {
+			return false
+		}
+	}
+	switch string(b[4:8]) {
+	case "ftyp", "styp", "moof", "moov", "sidx", "free", "emsg", "prft":
+		return false
+	}
+	return !bytes.HasPrefix(b, []byte("ID3")) && !(b[0] == 0xFF && b[1]&0xF0 == 0xF0) &&
+		!bytes.HasPrefix(b, []byte("WEBVTT")) && !bytes.HasPrefix(b, []byte("#EXTM3U"))
 }
