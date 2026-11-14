@@ -6,7 +6,8 @@
 // the page cannot reach it) and tells background.js what the requests alone
 // do not show:
 //
-//   - the streams page.js found in the answers the player got,
+//   - the streams page.js found in the answers the player got, and a list
+//     the player built in memory, which has no link,
 //   - the videos the page names in its markup (<video>, <audio>, <source>),
 //     also before they are loaded or when they came from the cache,
 //   - that a video plays from memory (blob), so the popup can say why
@@ -24,6 +25,7 @@
   const againAfterMs = 15000;
   const minSeconds = 20; // shorter clips are previews and ads
   const minWidth = 300; // a video drawn smaller is a preview tile
+  const maxListChars = 3 * 1024 * 1024; // a list from memory, as JSON text
 
   let isTop = true;
   try {
@@ -37,6 +39,7 @@
   const watched = new WeakSet(); // media inside shadow trees that have listeners
   let items = [];
   let notes = [];
+  let lists = [];
   let blob = false;
   let embed = false;
   let blobTold = false;
@@ -45,10 +48,11 @@
 
   function flush() {
     timer = null;
-    const message = { type: "vc-found", items, notes, blob: blob && !blobTold, embed: embed && !embedTold };
+    const message = { type: "vc-found", items, notes, lists, blob: blob && !blobTold, embed: embed && !embedTold };
     items = [];
     notes = [];
-    if (message.items.length === 0 && message.notes.length === 0 && !message.blob && !message.embed) return;
+    lists = [];
+    if (message.items.length === 0 && message.notes.length === 0 && message.lists.length === 0 && !message.blob && !message.embed) return;
     blobTold = blobTold || blob;
     embedTold = embedTold || embed;
     try {
@@ -77,13 +81,20 @@
   document.addEventListener(eventName, (e) => {
     let d;
     try {
-      if (typeof e.detail !== "string" || e.detail.length > 8192) return;
+      if (typeof e.detail !== "string") return;
+      // Short, except for a list the player built in memory.
+      if (e.detail.length > 8192 && !(e.detail.length <= maxListChars && e.detail.startsWith('{"list":"'))) return;
       d = JSON.parse(e.detail);
     } catch (err) {
       return;
     }
     if (!d || typeof d !== "object") return;
-    if (typeof d.note === "string") {
+    if (typeof d.list === "string") {
+      // A list without a link (background.js checks it again). The newest
+      // counts: a player that starts over builds a new one.
+      lists = [{ text: d.list, master: d.master === true, duration: d.duration }];
+      later();
+    } else if (typeof d.note === "string") {
       // For the report only (background.js checks it again).
       if (notes.length < 10 && d.note.length <= 200) notes.push(d.note);
       later();

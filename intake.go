@@ -60,11 +60,20 @@ type intakeRequest struct {
 	Headers    map[string]string `json:"headers,omitempty"`
 	HeaderFile string            `json:"-"`
 	UserAgent  string            `json:"-"`
+	// List is an HLS list a player built in the page's memory (memlist.go),
+	// only from the extension; URL is then the page of the player. On
+	// reading it is checked and written into files for yt-dlp.
+	List      string   `json:"list,omitempty"`
+	ListFiles []string `json:"-"`
+	// Problem: the request was read, but cannot become a download (its list
+	// was refused). The window says why instead of staying silent after
+	// the browser said "sent".
+	Problem error `json:"-"`
 }
 
 const (
 	requestVersion  = 1
-	maxRequestBytes = 1 << 20 // a link, a title and the cookies of one site
+	maxRequestBytes = 4 << 20 // a link, a title, the cookies of one site and a list from memory
 	maxTitleLen     = 300
 	protocolScheme  = "videocatcher"
 )
@@ -162,6 +171,28 @@ func (in *intake) readRequest(name string) (intakeRequest, error) {
 		if req.HeaderFile, err = in.writeSecret("h-*.conf", headerConfig(headers)); err != nil {
 			in.logger.Warn("request headers not used", "err", err) // the link still goes, only without them
 		}
+	}
+	if req.List != "" {
+		files, lerr := writeList(req.List, req.URL, in.writeSecret)
+		req.List = ""
+		if lerr != nil {
+			// Without its list the request is only the page of a player,
+			// which is what did not work before: it ends here, with a word.
+			for _, f := range append(files, req.CookieFile, req.HeaderFile) {
+				if f != "" {
+					os.Remove(f) // ignore: a leftover is removed at the next start (removeOrphans)
+				}
+			}
+			req.CookieFile, req.HeaderFile = "", ""
+			req.Problem = userError(lerr, "The video's list from the browser could not be used",
+				"Reload the page, start the video and send it again. If it stays, copy a report in the extension's window and open an issue.")
+			if errors.Is(lerr, errListKey) {
+				req.Problem = userError(lerr, "The site keeps the key of this video in its player",
+					"The parts of the video are locked, and the key never leaves the player. Video-Catcher does not take it from there.")
+			}
+			return req, nil
+		}
+		req.ListFiles = files
 	}
 	return req, nil
 }

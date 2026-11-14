@@ -80,6 +80,8 @@ It finds them in four ways, because sites hide their videos differently: by the 
 
 **Sites behind a bot check (Cloudflare):** such a site lets browsers in and turns everything else away. Video-Catcher then tries once more, answering the way your browser does, and the extension passes along the proof that the site let your browser in (a cookie of the bot check, not a login). Open the page until the video plays, then send it ([how it works](docs/browser-bridge.md#sites-behind-a-bot-check)).
 
+**A stream without a link:** some players build the list of their stream in the page's memory and load only the parts. The extension lists such a stream as "built by the player" and sends the list itself; Video-Catcher checks it (it may only name web links) and hands it to yt-dlp ([how it works](docs/browser-bridge.md#a-list-built-in-memory)). Parts that are locked with a key the player keeps to itself stay locked.
+
 **A video is not found:** play it, click **Copy a report** in the extension's window and add the text to an [issue](https://github.com/burnersen/VideoCatcher/issues). It lists what the extension saw on the page, with the links shortened so that no key and no login is in it.
 
 **Install it once:**

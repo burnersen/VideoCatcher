@@ -448,6 +448,10 @@ func (a *App) lookForNewVersion() {
 
 // accept is where links from outside the window arrive (intake.go).
 func (a *App) accept(req intakeRequest) {
+	if req.Problem != nil {
+		a.logError(req.Problem)
+		return
+	}
 	a.mu.Lock()
 	o := a.cfg.Defaults
 	o.OutputDir = a.downloadDirLocked()
@@ -458,7 +462,7 @@ func (a *App) accept(req intakeRequest) {
 		o.FileName = safeFileName(req.FileName)
 	}
 	dropLogin := func() {
-		for _, f := range []string{req.CookieFile, req.HeaderFile} {
+		for _, f := range append([]string{req.CookieFile, req.HeaderFile}, req.ListFiles...) {
 			if f != "" {
 				os.Remove(f) // ignore: a leftover is removed at the next start (removeOrphans)
 			}
@@ -472,7 +476,7 @@ func (a *App) accept(req intakeRequest) {
 		return
 	}
 	j, err := a.queue.AddWith(req.URL, o, req.Source, req.Referer, req.Title, req.CookieFile,
-		jobExtras{PageURL: req.PageURL, UserAgent: req.UserAgent, HeaderFile: req.HeaderFile})
+		jobExtras{PageURL: req.PageURL, UserAgent: req.UserAgent, HeaderFile: req.HeaderFile, ListFiles: req.ListFiles})
 	if err != nil {
 		dropLogin() // the job that would have used it does not exist
 		a.logError(err)

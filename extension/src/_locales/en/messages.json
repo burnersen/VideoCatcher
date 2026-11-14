@@ -35,5 +35,6 @@
   "report": { "message": "Copy a report" },
   "reportHint": { "message": "Video not found? Play it, then copy the report and add it to an issue. Links in it are shortened, logins are left out." },
   "reportCopied": { "message": "Copied. Paste it into your issue." },
-  "reportFailed": { "message": "The report could not be copied. Reload the page, play the video and try again." }
+  "reportFailed": { "message": "The report could not be copied. Reload the page, play the video and try again." },
+  "fromMemory": { "message": "built by the player" }
 }

@@ -198,7 +198,7 @@ func TestHeaderFileSurvivesARestart(t *testing.T) {
 	if err := q2.load(); err != nil {
 		t.Fatal(err)
 	}
-	if c, h := q2.loginFilesOf(j.ID); c != cookies || h != headers || !fileExists(headers) {
+	if c, h, _ := q2.loginFilesOf(j.ID); c != cookies || h != headers || !fileExists(headers) {
 		t.Errorf("after the restart: %q %q", c, h)
 	}
 	if raw, _ := os.ReadFile(filepath.Join(data, "queue.json")); strings.Contains(string(raw), q.cookieDir) {

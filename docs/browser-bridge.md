@@ -68,7 +68,7 @@ folder takes the keys over at its start.
 | Where | What it sees |
 |---|---|
 | `background.js` (`webRequest`) | every request of a tab: streams and files by the end of the address, the type of the answer, a stream named behind the `?`, the file name of a download; with the Referer the request really had |
-| `page.js` (inside the page, world `MAIN`) | the start of what `fetch` and `XMLHttpRequest` bring: an answer that begins like an HLS list, a DASH or a Smooth Streaming manifest is a stream, whatever its address and type say. It also knows whether an HLS list holds all qualities or one, and how long that one is |
+| `page.js` (inside the page, world `MAIN`) | the start of what `fetch` and `XMLHttpRequest` bring: an answer that begins like an HLS list, a DASH or a Smooth Streaming manifest is a stream, whatever its address and type say. It also knows whether an HLS list holds all qualities or one, and how long that one is. A list the player builds in the page's memory has no address; `page.js` passes on the list itself (see "A list built in memory" below) |
 | `content.js` (next to the page) | the videos the page names (`<video>`, `<audio>`, `<source>`, also in open shadow trees), a video playing from memory (`blob:`), and a player inside a frame, whose address is listed as a page to send |
 
 `page.js` tells `content.js` only the link (an event on the document),
@@ -113,7 +113,8 @@ The file holds, in version 1:
   "fileName": "Title of the page",
   "source": "extension",
   "cookies": "# Netscape HTTP Cookie File\n...",
-  "headers": { "User-Agent": "Mozilla/5.0 ...", "Origin": "https://example.org", "Authorization": "Bearer ..." }
+  "headers": { "User-Agent": "Mozilla/5.0 ...", "Origin": "https://example.org", "Authorization": "Bearer ..." },
+  "list": "#EXTM3U\n#EXT-X-STREAM-INF:...\ndata:application/vnd.apple.mpegurl;base64,...\n"
 }
 ```
 
@@ -126,6 +127,7 @@ The file holds, in version 1:
 | `source` | `extension` starts the download like a link from the window. Anything else waits for the user's OK. |
 | `cookies` | Optional. The cookies of the site in the Netscape cookie file format, for videos you only see when logged in. Without that option, only the proof of a bot check (see "Sites behind a bot check" below). |
 | `headers` | Optional. Request headers the browser sent for the video, name to value (see below). Added in 0.6.0; older versions ignore the field. |
+| `list` | Optional. An HLS list the player built in the page's memory, as text; `url` is then the page of the player (see "A list built in memory" below). Added in 0.8.0; older versions ignore the field and try the page. |
 
 **Cookies** are logins. VideoCatcher writes them into a file of its own for
 exactly one download (`%LOCALAPPDATA%\VideoCatcher\cookies\`, a folder only
@@ -195,6 +197,34 @@ link. Three things help such a download through, in this order:
    in", and "What yt-dlp said" keeps the lines of every try. A yt-dlp build
    without the part for this (possible on Windows on ARM) is told apart:
    "The site wants a real browser, and this yt-dlp cannot answer like one".
+
+### A list built in memory
+
+Some players never load a list of their stream: they build it in the page's
+memory (the list of qualities as a `blob:`, each quality written into it as
+a `data:` link) and load only the parts, often under names that say nothing
+(`4800.html`). Such a stream has no link to send. `page.js` sees the list
+when the player hands it to the browser and passes its text on; the popup
+lists it as an HLS stream "built by the player", and it is sent as `list`.
+
+The text comes out of a web page, so `memlist.go` trusts nothing in it. It
+writes the list into files of the cookie folder, one per list, and what
+comes out names only two kinds of links: web links (`http`, `https`), and
+the files written for this one job (the qualities, and a key that was
+written into the list itself). A list that names anything else, such as a
+file of this PC, is refused as a whole. yt-dlp gets the first file with
+`--enable-file-urls`; that option is on for such a job only, where every
+`file:` link is one Video-Catcher wrote itself. The files are deleted with
+the job's cookies, and their folder is taken out of what yt-dlp says before
+it reaches the details. The parts are asked for the way the player asks:
+with the player's page as `Referer` and `Origin`, as the same browser.
+
+What this does not do: take a key out of a player. If the parts are locked
+and the key is not a link a downloader can ask for (a `blob:` link), the
+window says "The site keeps the key of this video in its player" and
+nothing is downloaded. If the site hands the key only to its own script,
+yt-dlp asks for it, is refused, and the download fails with the site's
+answer.
 
 ### When a video is not found
 

@@ -80,7 +80,8 @@ const popup = {
   // HLS stream whether it holds all qualities or one, how long it is, and
   // for a file its size (for a stream that would be the size of its list).
   details(item) {
-    const parts = [hostOf(item.url)];
+    const parts = [hostOf(item.via === "memory" ? item.base : item.url)];
+    if (item.via === "memory") parts.push(msg("fromMemory"));
     if (item.kind === "hls" && item.master === true) parts.push(msg("allQualities"));
     if (item.kind === "hls" && item.master === false) parts.push(msg("oneQuality"));
     parts.push(formatDuration(item.duration));
@@ -100,8 +101,8 @@ const popup = {
     what.append(kind, document.createTextNode(this.details(item)));
     const where = document.createElement("span");
     where.className = "where";
-    where.textContent = [shortPath(item.url), item.frameUrl ? msg("inFrame", hostOf(item.frameUrl)) : ""].filter(Boolean).join("  ");
-    where.title = item.url;
+    where.textContent = [shortPath(item.via === "memory" ? item.base : item.url), item.frameUrl ? msg("inFrame", hostOf(item.frameUrl)) : ""].filter(Boolean).join("  ");
+    where.title = item.via === "memory" ? item.base : item.url;
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = msg("send");
