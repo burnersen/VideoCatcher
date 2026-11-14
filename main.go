@@ -23,8 +23,10 @@
 //	speed.go     the speed slider: a local relay that limits all downloads
 //	names.go     tidy file names (letters and digits, dots between)
 //	afterall.go  when all downloads are done: quit, sleep, shut down
-//	power_*.go   sleep, hibernate, shut down
+//	power_*.go   sleep, hibernate, shut down; keeping the PC awake
 //	tray_*.go    the icon in the notification area
+//	notify.go    what that icon tells while the window is away
+//	appupdate.go is a newer VideoCatcher out? (a note, nothing is installed)
 //	toolbox.go   yt-dlp, FFmpeg, Deno: status and preparation
 //	tools.go     pinned FFmpeg and Deno (runtime.json), tools.json
 //	ytdlp.go     newest yt-dlp, checked with its signed checksum list

@@ -43,15 +43,19 @@
 - **Almost any site:** everything [yt-dlp supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md), from YouTube to small video portals, including videos you only see when logged in (with the logins of your browser).
 - **See before you download:** title, length, every format with its size, subtitles in all languages, the entries of a playlist, and the exact file name it will get.
 - **The settings that matter, in plain words:** quality (best, 4K to 360p, audio only), file format, audio format and quality, subtitles (in the video, as a file, or both), playlists (all or only some entries), file name patterns or a name of your own for one video, cover picture, chapters, YouTube sponsor segments, speed limit.
-- **A real download manager:** a list with progress, speed and time left, several downloads at the same time, stop and try again, and the list survives a restart.
+- **A real download manager:** a list with progress, speed and time left, several downloads at the same time, stop and try again (one, or all failed ones together), put a waiting download in front with **Next**, search the list, and the list survives a restart. The window title, and with it the taskbar, shows how far the downloads are.
+- **What you downloaded, one click away:** a finished download shows its size, how long it took and when it ended. **Play** opens it, **Show in folder** finds it, a playlist lists all its files, and a click on the site's name copies the link.
+- **Tries again by itself:** when the connection drops, a download waits half a minute, then two minutes, and goes on with what it has, instead of failing at once. Trouble with the video itself (login, DRM, deleted) is not tried again.
+- **Playlists that are not perfect:** when single videos of a playlist cannot be loaded (private, deleted, blocked), the playlist is still done, says how many are missing and why.
+- **Stays awake:** while downloads run or wait, Windows does not go to sleep by itself. You can still send the PC to sleep.
 - **Pause and continue:** pause a download (or all of them) and continue it later where it stopped, also after a restart. Closing Video-Catcher during a download pauses it; it goes on at the next start. Whether a half download can be continued depends on the site; if a link has expired, the download starts again from the beginning.
 - **Speed slider:** 1 to 100 % of your line, for all downloads together, and it works at once, also on downloads that are running. 100 % is the fastest speed Video-Catcher measured while there was no limit ([how it works](#-what-it-does-on-the-network)).
-- **Keeps running in the notification area:** with downloads running, the close button puts the window into the notification area and the downloads go on (setting **Close button of the window**). A click on the icon brings it back, its menu has **Quit**.
+- **Keeps running in the notification area:** with downloads running, the close button puts the window into the notification area and the downloads go on (setting **Close button of the window**). A click on the icon brings it back, its menu has **Quit**. While the window is away, the icon tells you when a download failed and when all are done.
 - **When all are done:** quit Video-Catcher, put the PC to sleep, hibernate or shut it down, after a 60 second countdown you can cancel. It holds for this run only.
 - **Tidy file names:** letters and digits stay, everything else becomes a dot, never two in a row: `Holiday 2026 (Part #2) - Sea.mp4` becomes `Holiday.2026.Part.Nr2.Sea.mp4`. Letters of every script stay. Subtitles and cover pictures next to the video are renamed with it. On by default, one tick to turn it off.
-- **Drag and drop:** drag a link from the browser onto the window. One link is looked up, several are added straight away; `.txt` files with links and Internet shortcuts (`.url`) work too.
-- **yt-dlp stays up to date by itself,** and safely: a new yt-dlp is only used if its release is signed by the yt-dlp release key built into Video-Catcher.
-- **Errors in plain words:** "The site only shows this video to logged-in users" instead of a Python traceback, with what to do about it. What yt-dlp said is one click away.
+- **Drag and drop, or Ctrl+V:** drag a link from the browser onto the window, or press Ctrl+V anywhere in it. One link is looked up, several are added straight away; dropped `.txt` files with links and Internet shortcuts (`.url`) work too. A link that is already in the list is named before it is added a second time.
+- **yt-dlp stays up to date by itself,** and safely: a new yt-dlp is only used if its release is signed by the yt-dlp release key built into Video-Catcher. When a newer Video-Catcher is out, the window says so at the bottom, with a link to the release; it installs nothing by itself.
+- **Errors in plain words:** "The site only shows this video to logged-in users" instead of a Python traceback, with what to do about it. What yt-dlp said is one click away, and **Copy details** puts everything a bug report needs into the clipboard.
 - **Straight from the browser:** the Video-Catcher extension for Firefox, Chrome and Edge sees which videos a page loads, also inside embedded players, and sends them with one click ([below](#-browser-extension)).
 - **Links from outside:** `VideoCatcher.exe --add <link>`, `videocatcher://` links and a bookmarklet ([how it works](docs/browser-bridge.md)).
 - **English and German,** light or dark like Windows.
@@ -102,13 +106,14 @@ Everything can be set in the window (**Settings**, and "Use the current download
 | `speedLimit`, `fragments` | empty, `4` | e.g. `5M`; parts of a stream loaded at once (1 to 16) |
 | `cookiesFromBrowser` | `none` | `firefox`, `chrome`, `edge`, `brave`, `opera`, `vivaldi`, `chromium` |
 | `parallelDownloads` | `2` | 1 to 5 |
-| `checkUpdatesAtStart` | `true` | Look for a new yt-dlp at every start |
+| `checkUpdatesAtStart` | `true` | Look for a new yt-dlp and a newer Video-Catcher at every start |
 | `language` | `auto` | `auto`, `en`, `de` |
 | `watchClipboard` | `false` | Offer links as soon as they are copied |
 | `tidyFileNames` | `true` | Rename downloaded files: letters and digits stay, everything else becomes one dot |
 | `closeButton` | `tray-if-running` | `quit` (running downloads pause and go on at the next start), `tray-if-running` (keep running in the notification area while downloads run), `tray` (always) |
 | `speedPercent` | `100` | The speed slider, 1 to 100; 100 means no limit |
 | `measuredSpeed` | `0` | 100 % of the slider in bytes per second, measured by Video-Catcher itself; set it to `0` to measure again |
+| `window` | empty | Size of the window when it was last closed, e.g. `1240x820` or `1240x820,max`; written by Video-Catcher itself, empty means the default size |
 
 An invalid value is reported in the activity log, and its default is used instead.
 
@@ -131,6 +136,7 @@ An invalid value is reported in the activity log, and its default is used instea
 
 - The pages and media you ask it to download, through yt-dlp.
 - GitHub, to find the newest yt-dlp and download it with its signed checksum list: at start (can be switched off) and when you click **Check for updates**.
+- GitHub, at the same two moments, to see whether a newer Video-Catcher was released. It asks for the address of the newest release and sends nothing about you or your version. Nothing is downloaded; the link in the window opens the release page in your browser.
 - GitHub, to download FFmpeg and Deno once, when they are missing. Both are pinned to one version by size and SHA-256 ([runtime.json](runtime.json)).
 - The preview pictures of the videos you look up, from the site itself.
 

@@ -153,19 +153,20 @@
         <h2 id="jobs-title" data-i18n="jobs.title"></h2>
         <span id="jobs-counts" class="muted"></span>
         <span class="spacer"></span>
+        <input id="jobs-search" type="text" class="search" autocomplete="off" spellcheck="false" data-i18n-ph="jobs.search">
         <button id="open-folder" type="button" class="ghost small" data-i18n="jobs.openFolder"></button>
         <button id="clear-done" type="button" class="ghost small" data-i18n="jobs.clear"></button>
       </div>
       <div class="jobs-tools">
         <button id="pause-all" type="button" class="ghost small" data-i18n="jobs.pauseAll"></button>
         <button id="resume-all" type="button" class="ghost small" data-i18n="jobs.resumeAll"></button>
+        <button id="retry-failed" type="button" class="ghost small" data-i18n="jobs.retryFailed" hidden></button>
         <label class="speed" for="speed"><span data-i18n="speed.label"></span>
           <input id="speed" type="range" min="1" max="100" step="1">
           <span id="speed-pct" class="num"></span></label>
         <span id="speed-info" class="muted num"></span>
-        <span class="spacer"></span>
-        <label for="after-all" class="muted" data-i18n="after.label"></label>
-        <select id="after-all"></select>
+        <span class="after"><label for="after-all" class="muted" data-i18n="after.label"></label>
+          <select id="after-all"></select></span>
       </div>
       <p id="after-waiting" class="hint-small after-waiting" data-i18n="after.waiting" hidden></p>
       <section id="after-banner" class="after-banner" role="alert" hidden>
@@ -173,6 +174,7 @@
         <button id="after-abort" type="button" class="small" data-i18n="after.abort"></button>
       </section>
       <p id="jobs-empty" class="muted" data-i18n="jobs.empty"></p>
+      <p id="jobs-nomatch" class="muted" data-i18n="jobs.noMatch" hidden></p>
       <ol id="jobs" class="job-list"></ol>
     </section>
   </main>
@@ -223,8 +225,10 @@
 
   <div id="drop-zone" class="drop-zone" hidden><span data-i18n="drop.here"></span></div>
 
-  <footer class="foot">Video-Catcher <span id="version"></span></footer>
+  <footer class="foot">Video-Catcher <span id="version"></span>
+    <button id="update-note" type="button" class="update-note" hidden></button></footer>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
+  <script src="jobs.js"></script>
 </body>
 </html>

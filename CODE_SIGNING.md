@@ -51,6 +51,9 @@ What VideoCatcher does on the network, and only for that:
 - GitHub, to find the newest yt-dlp release and download it with its signed
   checksum list: at start (can be switched off in the settings) and when you
   click "Check for updates".
+- GitHub, at the same two moments, to see whether a newer VideoCatcher was
+  released: it reads the address of the newest release, sends nothing about
+  the user or the installed version, and downloads nothing.
 - GitHub, to download FFmpeg and Deno once, when they are missing.
 
 The browser extension makes no requests of its own. To find videos it sees

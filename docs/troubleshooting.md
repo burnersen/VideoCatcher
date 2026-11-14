@@ -2,7 +2,8 @@
 
 The messages Video-Catcher shows when yt-dlp could not download something,
 and what to do. "What yt-dlp said" below a failed download shows yt-dlp's
-own words; please include them in a bug report.
+own words; **Copy details** puts them into the clipboard together with the
+message, the link and the version, for a bug report.
 
 | Message | What to do |
 |---|---|
@@ -20,7 +21,9 @@ own words; please include them in a bug report.
 | The video is not available | It may have been deleted or made private. Check the link in your browser. |
 | The disk is full | Free some space or choose another download folder. |
 | VideoCatcher may not write into the download folder | Choose another folder, or check that no other program has the file open. |
-| The site could not be reached | Check the internet connection and try again. |
+| The site could not be reached | Check the internet connection and try again. Video-Catcher has tried twice more by itself before it says this (after 30 seconds and after 2 minutes); while it does, the download says "site not reached, trying again soon". |
+| Done, with "1 not downloaded" (a playlist) | The other videos are there. The message below and "What yt-dlp said" name the ones that are missing and why (private, deleted, blocked). "Try again" loads the playlist again; what is already in the folder is skipped. |
+| The file is no longer there | **Play** could not find the file: it was moved, renamed or deleted after the download. |
 | yt-dlp could not download this | The message shows what yt-dlp said. Click "Check for updates" and try again; if it stays, open an issue with the log. |
 
 ## Programs
