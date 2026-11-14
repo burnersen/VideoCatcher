@@ -9,7 +9,7 @@ const path = require("path");
 const { loadPage, check, done, dist, target } = require("./check_harness");
 
 const html = fs.readFileSync(path.join(dist, "index.html"), "utf8");
-const js = fs.readFileSync(path.join(dist, "app.js"), "utf8");
+const js = ["app.js", "jobs.js"].map((f) => fs.readFileSync(path.join(dist, f), "utf8")).join("\n");
 const css = fs.readFileSync(path.join(dist, "style.css"), "utf8");
 const appGo = fs.readFileSync(path.join(__dirname, "..", "app.go"), "utf8");
 
@@ -37,7 +37,7 @@ function backend(over) {
     calls,
     Initial: async () => ({ version: "1.2.3", settings: { defaults, downloadDir: "", parallel: 2, checkUpdates: true, language: "auto", watchClipboard: false, closeButton: "tray-if-running" },
       defaultDir: defaults.outputDir, choices, tools: [{ tool: "yt-dlp", state: "ready", version: "2026.10.26", purpose: "downloads" }], jobs: [],
-      speed: { percent: 100, rate: 0, limit: 0, peak: 0, active: true }, afterAll: { action: "none", seconds: 0, waiting: false }, hasTray: true }),
+      speed: { percent: 100, rate: 0, limit: 0, peak: 0, active: true }, afterAll: { action: "none", seconds: 0, waiting: false }, hasTray: true, update: "" }),
     Probe: async (link, pl, ck) => { calls.push(["Probe", link, pl, ck]); return { url: link, title: "Found <b>it</b>", uploader: "Someone", site: "Youtube", duration: 212,
       thumbnail: "https://i.ytimg.com/x.jpg", heights: [1080, 720], formats: [{ id: "137", ext: "mp4", height: 1080, hasVideo: true, hasAudio: false, size: 1000 }],
       subtitles: ["de"], autoSubs: ["en-orig"], probeId: "p1" }; },
@@ -60,6 +60,13 @@ function backend(over) {
     SetAfterAll: async (a) => { calls.push(["SetAfterAll", a]); return { action: a, seconds: 0, waiting: true }; },
     AbortAfterAll: async () => { calls.push(["AbortAfterAll"]); return { action: "none", seconds: 0, waiting: false }; },
     SetTrayTexts: async (x) => { calls.push(["SetTrayTexts", x]); },
+    Known: async (link) => { calls.push(["Known", link]); return ""; },
+    StartNext: async (id) => { calls.push(["StartNext", id]); },
+    RetryFailed: async () => { calls.push(["RetryFailed"]); return 1; },
+    OpenFile: async (id, i) => { calls.push(["OpenFile", id, i]); },
+    CopyLink: async (id) => { calls.push(["CopyLink", id]); },
+    CopyDetails: async (id) => { calls.push(["CopyDetails", id]); },
+    OpenRelease: async () => { calls.push(["OpenRelease"]); },
   };
   return Object.assign(b, over || {});
 }
@@ -77,6 +84,7 @@ function backend(over) {
     check(`error box ${box} is complete`, ["", "-msg", "-hint"].every((s) => html.includes(`id="${box}${s}"`)));
   }
   check("index.html loads i18n.js before app.js", html.indexOf('src="i18n.js"') > 0 && html.indexOf('src="i18n.js"') < html.indexOf('src="app.js"'));
+  check("index.html loads jobs.js after app.js", html.indexOf('src="app.js"') > 0 && html.indexOf('src="app.js"') < html.indexOf('src="jobs.js"'));
   check("index.html loads style.css", html.includes('href="style.css"'));
   check("no inline script in index.html", !/<script>[\s\S]*?<\/script>/.test(html));
 
@@ -198,7 +206,7 @@ function backend(over) {
   check("job grid column can shrink", /minmax\(0, 1fr\)/.test(rule(".job")), rule(".job"));
   check("layout column can shrink", /minmax\(0, 1fr\)/.test(rule(".layout")), rule(".layout"));
   check("page column can shrink", /grid-template-columns:\s*minmax\(0, 1fr\)/.test(rule("body")), rule("body"));
-  for (const sel of [".job .meta", ".job .error-text", ".job .confirm-text", ".log-list li"]) {
+  for (const sel of [".job .sub", ".job .error-text", ".job .confirm-text", ".log-list li"]) {
     check(`${sel} breaks long words`, /overflow-wrap:\s*anywhere/.test(rule(sel)), rule(sel));
   }
   const longLink = "https://example.org/" + "a".repeat(500);
@@ -404,6 +412,133 @@ function backend(over) {
     await d.ui.onDrop(dt({ "text/plain": "no link here" }));
     check("nothing to take is said", d.el("error").hidden === false && d.el("error-msg").textContent.includes("no link"));
     check("linksIn trims punctuation", JSON.stringify(d.linksIn("(https://x.org/v).")) === JSON.stringify(["https://x.org/v"]));
+  }
+
+  // The list: what a done download shows, the buttons of each state, the
+  // search, and the note about a newer version.
+  {
+    const b4 = backend({ Known: async (link) => (link.endsWith("/twice") ? "waiting" : link.endsWith("/had") ? "done" : "") });
+    const q = loadPage(b4);
+    await q.docListeners.DOMContentLoaded();
+    const html = () => q.el("jobs").innerHTML;
+    const click = (dataset) => q.el("jobs").fire("click", { target: target(dataset) });
+
+    q.events.job(job({ id: "d1", status: "done", stage: "done", percent: 100, title: "Holiday", files: ["D:\\V\\Holiday.mp4"],
+      size: 1.5 * 1024 * 1024, elapsed: 192, ended: "2026-11-14T16:40:00Z" }));
+    check("a done download shows its size and how long it took", html().includes("1.5 MB") && html().includes("in 3:12"), html());
+    check("a done download shows when it ended", q.formatWhen("2026-11-14T16:40:00Z") !== "" && html().includes(q.esc(q.formatWhen("2026-11-14T16:40:00Z"))));
+    check("no date gives no text", q.formatWhen("0001-01-01T00:00:00Z") === "" && q.formatWhen("") === "" && q.formatWhen("nonsense") === "");
+    check("a done download can be played and shown", html().includes('data-action="open"') && html().includes('data-action="show"'));
+    await click({ action: "open", id: "d1", index: "0" });
+    check("Play asks Go for the file of the job", JSON.stringify(b4.calls.find((c) => c[0] === "OpenFile")) === JSON.stringify(["OpenFile", "d1", 0]));
+    check("the site copies the link", html().includes('data-action="copy-link"') && html().includes(">youtube.com<"));
+    const hostButton = target({ action: "copy-link", id: "d1" });
+    hostButton.textContent = "youtube.com";
+    await q.el("jobs").fire("click", { target: hostButton });
+    check("copying the link is said on the button", b4.calls.some((c) => c[0] === "CopyLink" && c[1] === "d1") && hostButton.textContent === "Copied");
+    await q.runTimers();
+    check("the button gets its text back", hostButton.textContent === "youtube.com");
+
+    // A playlist of which one video failed: done, the files listed, the reason shown.
+    q.events.job(job({ id: "pl", status: "done", stage: "done, but not every video", percent: 100, title: "My list", added: "2026-11-07T15:00:00Z",
+      files: ["D:\\V\\One <1>.mp4", "D:\\V\\Two.mp4"], skipped: 1, size: 4096,
+      error: "The site only shows this video to logged-in users\nLog in to the site.", details: ["Error: [x] b: Private video"] }));
+    check("a playlist with a failed video says how many are missing", html().includes("1 not downloaded") && html().includes("2 files"), html());
+    check("its reason is shown", html().includes("only shows this video to logged-in users"));
+    check("its files are listed, names as text", html().includes('data-index="1"') && html().includes("One &lt;1&gt;.mp4") && !html().includes("One <1>"));
+    check("a playlist has no single Play button", (html().match(/data-action="open" data-id="pl"/g) || []).length === 2);
+    check("its details can be copied", html().includes('data-action="copy-details" data-id="pl"'));
+
+    // Failed: try again and copy details; waiting: next.
+    q.events.job(job({ id: "f1", status: "failed", stage: "failed", title: "Broken", url: "https://vimeo.com/1", added: "2026-11-07T16:00:00Z", error: "The site refused the download\nTry later." }));
+    check("a failed download offers its details for a report", html().includes('data-action="copy-details" data-id="f1"'));
+    await click({ action: "copy-details", id: "f1" });
+    check("Copy details asks Go", b4.calls.some((c) => c[0] === "CopyDetails" && c[1] === "f1"));
+    check("the failed ones can be tried again together", q.el("retry-failed").hidden === false);
+    await q.el("retry-failed").click();
+    check("Try failed again asks Go", b4.calls.some((c) => c[0] === "RetryFailed"));
+    q.events.job(job({ id: "w1", status: "waiting", stage: "waiting", percent: 0, title: "Later", added: "2026-11-07T17:00:00Z" }));
+    check("a waiting download can go next", html().includes('data-action="next" data-id="w1"'));
+    await click({ action: "next", id: "w1" });
+    check("Next asks Go", b4.calls.some((c) => c[0] === "StartNext" && c[1] === "w1"));
+    q.events.job(job({ id: "w1", status: "waiting", stage: "next", next: true, percent: 0, title: "Later", added: "2026-11-07T17:00:00Z" }));
+    check("the one that is next says so and has no Next button", q.el("job-w1").outerHTML.includes("next in line") && !q.el("job-w1").outerHTML.includes('data-action="next"'), q.el("job-w1").outerHTML);
+    q.events.job(job({ id: "w2", status: "waiting", stage: "site not reached, trying again soon", percent: 30, title: "Flaky", added: "2026-11-07T18:00:00Z" }));
+    check("a download that tries again says why it waits", html().includes("site not reached, trying again soon"));
+    q.events.job(job({ id: "f1", status: "done", stage: "done", percent: 100, title: "Broken", url: "https://vimeo.com/1", added: "2026-11-07T16:00:00Z", files: [] }));
+    check("no failed download: the button goes", q.el("retry-failed").hidden === true);
+
+    // Search: by title, site, state and file name; hidden rows stay hidden on updates.
+    const search = async (text) => { q.el("jobs-search").value = text; await q.el("jobs-search").fire("input"); };
+    await search("  HOLI ");
+    check("search by title", html().includes('id="job-d1"') && !html().includes('id="job-pl"') && !html().includes('id="job-w1"'));
+    q.events.job(job({ id: "w2", status: "running", stage: "downloading", percent: 55, title: "Flaky", added: "2026-11-07T18:00:00Z" }));
+    check("an update of a hidden download does not bring it back", !html().includes('id="job-w2"'));
+    check("the counts still know it", q.el("jobs-counts").textContent.includes("1 running"));
+    await search("vimeo");
+    check("search by site", html().includes('id="job-f1"') && !html().includes('id="job-d1"'));
+    await search("two.mp4");
+    check("search by file name", html().includes('id="job-pl"') && !html().includes('id="job-d1"'));
+    await search("no such thing");
+    check("nothing found is said", html() === "" && q.el("jobs-nomatch").hidden === false && q.el("jobs-empty").hidden === true);
+    q.events.job(job({ id: "n1", status: "waiting", stage: "waiting", percent: 0, title: "No such thing at all", added: "2026-11-07T19:00:00Z" }));
+    check("a new download that fits the search appears", html().includes('id="job-n1"') && q.el("jobs-nomatch").hidden === true);
+    await search("");
+    check("an empty search shows all", ["d1", "pl", "f1", "w1", "w2", "n1"].every((id) => html().includes(`id="job-${id}"`)));
+
+    // A link that is in the list already: said once, added with the second click.
+    const addsOf = () => b4.calls.filter((c) => c[0] === "Add").length;
+    q.el("link").value = "https://example.org/twice";
+    await q.el("add").click();
+    check("a link that is in the list is not added at once", addsOf() === 0 && q.el("add-status").textContent.includes("already in the list"), q.el("add-status").textContent);
+    check("the link stays in the field", q.el("link").value === "https://example.org/twice" && q.el("add").disabled === false);
+    await q.el("add").click();
+    check("the second click adds it", addsOf() === 1);
+    q.el("link").value = "https://example.org/had";
+    await q.el("add").click();
+    check("a link that was downloaded is named as such", addsOf() === 1 && q.el("add-status").textContent.includes("already downloaded"));
+    q.el("link").value = "https://example.org/new";
+    await q.el("add").click();
+    check("a new link is added at once", addsOf() === 2);
+
+    // A newer version: the note at the bottom, in the page's language.
+    check("no newer version: no note", q.el("update-note").hidden === true);
+    q.events.update("1.3.0");
+    check("a newer version is named at the bottom", q.el("update-note").hidden === false && q.el("update-note").textContent === "Version 1.3.0 is available");
+    await q.el("update-note").click();
+    check("the note opens the release page through Go", b4.calls.some((c) => c[0] === "OpenRelease"));
+    q.ui.setLanguage("de");
+    check("the note follows the language", q.el("update-note").textContent === "Version 1.3.0 ist da");
+    const tray = b4.calls.filter((c) => c[0] === "SetTrayTexts").pop()[1];
+    check("the tray gets the words for its news", tray.allDoneTitle === "Alle Downloads sind fertig" && tray.allDoneBad.includes("{f}") && tray.failedText === "{t}");
+  }
+
+  // Ctrl+V anywhere in the window: like a dropped link. Typing elsewhere stays typing.
+  {
+    const b5 = backend();
+    const v = loadPage(b5);
+    await v.docListeners.DOMContentLoaded();
+    const clip = (text) => ({ getData: (type) => (type === "text/plain" ? text : "") });
+    let prevented = 0;
+    const paste = (text, targetEl) => v.docListeners.paste({ target: targetEl || { tagName: "BODY" }, clipboardData: clip(text), preventDefault: () => prevented++ });
+    await paste("https://example.org/pasted");
+    check("a pasted link is looked up", prevented === 1 && v.el("link").value === "https://example.org/pasted" && b5.calls.some((c) => c[0] === "Probe" && c[1] === "https://example.org/pasted"));
+    await paste("https://a.org/1\nhttps://b.org/2");
+    check("several pasted links are added", JSON.stringify(b5.calls.filter((c) => c[0] === "Add").map((c) => c[1])) === JSON.stringify(["https://a.org/1", "https://b.org/2"]));
+    const before = b5.calls.length;
+    await paste("just words");
+    check("pasted text without a link is left alone", prevented === 2 && b5.calls.length === before && v.el("error").hidden !== false);
+    await paste("https://example.org/name", { tagName: "INPUT", id: "own-name" });
+    check("pasting into another field stays typing", prevented === 2 && b5.calls.length === before);
+    await paste("https://example.org/field", { tagName: "INPUT", id: "link" });
+    check("pasting into the link field looks the link up", prevented === 3 && b5.calls.some((c) => c[0] === "Probe" && c[1] === "https://example.org/field"));
+    v.el("settings").open = true;
+    const n = b5.calls.length;
+    await paste("https://example.org/dialog");
+    check("no paste behind the settings dialog", b5.calls.length === n);
+    v.el("settings").open = false;
+    await v.el("paste").click();
+    check("the Paste button looks the link up too", b5.calls.some((c) => c[0] === "Probe" && c[1] === "https://example.org/v"));
   }
 
   // Outside the program (no Go side): a clear message, not a silent dead window.

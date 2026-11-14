@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // The logic of the page. Plain JavaScript: no framework, no npm, no build
-// step. Go does the work (app.go); this file asks Go and shows what Go
+// step. The list of downloads is in jobs.js, which adds its part to "ui". Go does the work (app.go); this file asks Go and shows what Go
 // reports. Texts come from i18n.js. Checked without a browser by
 // ../app_check.js.
 //
@@ -112,13 +112,14 @@ const ui = {
   previewTimer: null,
   autoName: "", // the name the pattern gives the looked-up video
   ownNameEdited: false, // the user typed a name of their own
-  jobShapes: new Map(), // id -> what a row looks like apart from the numbers (see upsertJob)
   speed: null, // SpeedState from Go
   speedDragging: false, // the slider is being moved: Go's numbers must not jump it back
   speedTimer: null,
   afterAll: null, // AfterAllState from Go
   afterLeft: 0, // seconds of the countdown shown
   afterRun: 0, // number of the running countdown; a new state stops the old one
+  askedTwice: "", // the link the user was told is in the list already
+  update: "", // a newer Video-Catcher ("1.2.3"), or ""
 
   backend() {
     return (window.go && window.go.main && window.go.main.App) || null;
@@ -247,7 +248,9 @@ const ui = {
     const app = this.backend();
     if (!app) return;
     const link = await app.Clipboard();
-    if (link) this.el("link").value = link;
+    if (!link) return;
+    this.el("link").value = link;
+    return this.lookup();
   },
 
   async lookup() {
@@ -377,6 +380,15 @@ const ui = {
     const button = this.el("add");
     button.disabled = true;
     try {
+      // A link that is in the list already: say so once. A second click
+      // adds it anyway (another quality, or the file is gone).
+      const known = link && app.Known ? await app.Known(link) : "";
+      if (known && this.askedTwice !== link) {
+        this.askedTwice = link;
+        this.el("add-status").textContent = t(known === "done" ? "add.knownDone" : "add.known");
+        return;
+      }
+      this.askedTwice = "";
       const job = await app.Add(link, this.options(), title || "");
       this.upsertJob(job);
       this.el("add-status").textContent = t("add.added", { t: job.title || hostOf(job.url) });
@@ -416,151 +428,24 @@ const ui = {
     }).join("");
   },
 
-  // --- downloads ---
+  // --- downloads: the list itself is in jobs.js ---
 
-  jobParts(j) {
-    const pct = j.status === "failed" ? "!" : j.status === "cancelled" ? "x" : Math.floor(j.percent || 0) + "%";
-    // A paused job keeps its numbers: they say how far it got.
-    const meta = [];
-    const item = (text, cls) => meta.push(`<span${cls ? ` class="${cls}"` : ""}>${esc(text)}</span>`);
-    // The stage comes from Go in English (queue.go, postStepLabel) and is
-    // shown in the page's language when i18n.js knows it.
-    const stage = (x) => ("st." + x in globalThis.vcTexts.en ? t("st." + x) : x);
-    if (j.status === "running") {
-      item(stage(j.stage));
-      if (j.items > 0) item(t("job.item", { i: j.item, n: j.items }));
-      if (j.total > 0) item(t("job.of", { a: formatSize(j.done), b: (j.estimated ? "~" : "") + formatSize(j.total) }), "num");
-      if (j.speed > 0) item(formatSize(j.speed) + "/s", "num");
-      if (j.eta > 0) item(t("job.eta", { t: formatDuration(j.eta) }), "num");
-    } else {
-      item(t("job." + j.status));
-      if (j.status === "done" && j.stage && j.stage !== "done") item(stage(j.stage));
-    }
-    item(hostOf(j.url));
-
-    const btn = (action, label, extra) => `<button type="button" class="ghost small" data-action="${action}" data-id="${esc(j.id)}"${extra || ""}>${esc(t(label))}</button>`;
-    const actions = [];
-    if (j.status === "running" || j.status === "waiting") actions.push(btn("pause", "job.pause"), btn("cancel", "job.stop"));
-    if (j.status === "paused") actions.push(btn("resume", "job.resume"), btn("cancel", "job.stop"));
-    if (j.status === "confirm") actions.push(btn("confirm", "job.yes"), btn("cancel", "job.stop"));
-    if (j.status === "failed" || j.status === "cancelled") actions.push(btn("retry", "job.retry"));
-    if (j.status === "done" && (j.files || []).length > 0) actions.push(btn("show", "job.show", ' data-index="0"'));
-    if (j.status !== "running") actions.push(btn("remove", "job.remove"));
-
-    let below = "";
-    if (j.status === "confirm") below += `<p class="confirm-text">${esc(t("job.confirm"))} ${esc(clipLong(j.url))}</p>`;
-    if (j.status === "failed" && j.error) {
-      const [msg, ...hint] = String(j.error).split("\n");
-      below += `<p class="error-text"><b>${esc(clipLong(msg))}</b>${esc(clipLong(hint.join(" ")))}</p>`;
-    }
-    if ((j.details || []).length > 0 && (j.status === "failed" || j.status === "done")) {
-      below += `<details><summary>${esc(t("job.details"))}</summary><pre>${esc(j.details.join("\n"))}</pre></details>`;
-    }
-    const id = esc(j.id);
-    const parts = {
-      pct,
-      title: j.title || j.url,
-      meta: meta.join(""),
-      width: Math.min(100, Math.max(0, Number(j.percent) || 0)) + "%",
-      // Everything else: when it stays the same, an update changes only
-      // the numbers (upsertJob).
-      shape: [j.status, j.url, actions.join(""), below].join("\u0000"),
-    };
-    parts.html = `<li id="job-${id}" class="job ${esc(j.status)}">` +
-      `<span id="job-${id}-pct" class="pct">${esc(pct)}</span>` +
-      `<span id="job-${id}-title" class="title" title="${esc(j.url)}">${esc(parts.title)}</span>` +
-      `<span class="actions">${actions.join("")}</span>` +
-      `<span id="job-${id}-meta" class="meta">${parts.meta}</span>` +
-      `<span class="track"><span id="job-${id}-fill" class="fill" style="width:${parts.width}"></span></span>` +
-      below + "</li>";
-    return parts;
+  // showUpdate: a newer Video-Catcher is out; the note at the bottom opens
+  // its release page in the browser.
+  showUpdate(v) {
+    this.update = v || "";
+    this.el("update-note").hidden = !this.update;
+    this.el("update-note").textContent = this.update ? t("update.available", { v: this.update }) : "";
   },
 
-  jobRow(j) {
-    return this.jobParts(j).html;
-  },
-
-  renderJobs() {
-    const list = [...this.jobs.values()].sort((a, b) => String(b.added).localeCompare(String(a.added)));
-    this.jobShapes = new Map();
-    this.el("jobs").innerHTML = list.map((j) => {
-      const parts = this.jobParts(j);
-      this.jobShapes.set(j.id, parts.shape);
-      return parts.html;
-    }).join("");
-    this.el("jobs-empty").hidden = list.length > 0;
-    this.renderCounts();
-  },
-
-  renderCounts() {
-    let r = 0;
-    let w = 0;
-    let p = 0;
-    for (const j of this.jobs.values()) {
-      if (j.status === "running") r++;
-      if (j.status === "waiting" || j.status === "confirm") w++;
-      if (j.status === "paused") p++;
-    }
-    this.el("jobs-counts").textContent = p > 0 ? t("jobs.countsPaused", { r, w, p }) : r + w > 0 ? t("jobs.counts", { r, w }) : "";
-  },
-
-  // upsertJob changes one row in place; a new job draws the whole list.
-  // While only the numbers change (progress comes four times a second), the
-  // row stays and only its numbers and bar change: a new row each time
-  // would swallow a click on "Stop" that starts on the old row and ends on
-  // the new one, and the bar could not glide.
-  upsertJob(j) {
-    const known = this.jobs.has(j.id);
-    this.jobs.set(j.id, j);
-    const row = known ? this.el("job-" + j.id) : null;
-    if (!row) {
-      this.renderJobs();
-      return;
-    }
-    const parts = this.jobParts(j);
-    if (this.jobShapes.get(j.id) === parts.shape) {
-      this.el("job-" + j.id + "-pct").textContent = parts.pct;
-      this.el("job-" + j.id + "-title").textContent = parts.title;
-      this.el("job-" + j.id + "-meta").innerHTML = parts.meta;
-      this.el("job-" + j.id + "-fill").style.width = parts.width;
-    } else {
-      row.outerHTML = parts.html;
-      this.jobShapes.set(j.id, parts.shape);
-    }
-    this.renderCounts();
-  },
-
-  async onJobsClick(e) {
-    const target = e.target && e.target.closest ? e.target.closest("[data-action]") : null;
-    if (!target) return;
+  async openRelease() {
     const app = this.backend();
     if (!app) return;
-    const id = target.dataset.id;
     try {
-      switch (target.dataset.action) {
-        case "cancel": await app.Cancel(id); break;
-        case "pause": await app.Pause(id); break;
-        case "resume": await app.Resume(id); break;
-        case "retry": await app.Retry(id); break;
-        case "confirm": await app.Confirm(id); break;
-        case "show": await app.ShowFile(id, Number(target.dataset.index) || 0); break;
-        case "remove":
-          await app.Remove(id);
-          this.jobs.delete(id);
-          this.renderJobs();
-          break;
-      }
+      await app.OpenRelease();
     } catch (err) {
       this.showError(err);
     }
-  },
-
-  async clearFinished() {
-    const app = this.backend();
-    if (!app) return;
-    const jobs = await app.ClearFinished();
-    this.jobs = new Map((jobs || []).map((j) => [j.id, j]));
-    this.renderJobs();
   },
 
   // --- speed slider ---
@@ -665,6 +550,13 @@ const ui = {
     const links = linksIn(text);
     this.clearError();
     if (links.length === 0) return this.showError(t("drop.none"));
+    return this.takeLinks(links);
+  },
+
+  // takeLinks: links that were dropped or pasted. One goes into the field
+  // and is looked up; several are added straight away with the options in
+  // the form.
+  async takeLinks(links) {
     if (links.length === 1) {
       this.el("link").value = links[0];
       return this.lookup();
@@ -681,6 +573,22 @@ const ui = {
       }
     }
     this.el("add-status").textContent = t("drop.added", { n });
+  },
+
+  // onPaste: Ctrl+V anywhere in the window takes the links in the
+  // clipboard like dropped ones. Typing into another field (a file name,
+  // the search) stays what it is, and so does pasting text without a link.
+  onPaste(e) {
+    const target = (e && e.target) || {};
+    const tag = String(target.tagName || "").toLowerCase();
+    const typing = tag === "input" || tag === "textarea" || tag === "select" || !!target.isContentEditable;
+    if ((typing && target.id !== "link") || this.el("settings").open) return;
+    const data = e && e.clipboardData;
+    const links = linksIn(data && data.getData ? data.getData("text/plain") : "");
+    if (links.length === 0) return;
+    if (e.preventDefault) e.preventDefault();
+    this.clearError();
+    return this.takeLinks(links);
   },
 
   // wireDrop: the page takes every drop itself. Left to the web view, a
@@ -710,7 +618,9 @@ const ui = {
     const app = this.backend();
     if (!app || !app.SetTrayTexts) return;
     app.SetTrayTexts({ open: t("tray.open"), quit: t("tray.quit"), running: t("tray.running"),
-      balloonTitle: t("tray.balloonTitle"), balloonText: t("tray.balloonText") }).catch(() => {}); // only words; the tray has English ones
+      balloonTitle: t("tray.balloonTitle"), balloonText: t("tray.balloonText"),
+      allDoneTitle: t("tray.allDoneTitle"), allDoneText: t("tray.allDoneText"), allDoneBad: t("tray.allDoneBad"),
+      failedTitle: t("tray.failedTitle"), failedText: "{t}" }).catch(() => {}); // only words; the tray has English ones
   },
 
   // --- activity log ---
@@ -805,6 +715,7 @@ const ui = {
     this.log(null);
     this.renderSpeed(this.speed);
     this.renderAfterAll(this.afterAll);
+    this.showUpdate(this.update);
     this.sendTrayTexts();
   },
 
@@ -856,6 +767,13 @@ const ui = {
     });
     on("jobs", "click", (e) => this.onJobsClick(e));
     on("clear-done", "click", () => this.clearFinished());
+    on("retry-failed", "click", () => this.retryFailed());
+    on("jobs-search", "input", () => {
+      this.filter = this.el("jobs-search").value.trim().toLowerCase();
+      this.renderJobs();
+    });
+    on("update-note", "click", () => this.openRelease());
+    document.addEventListener("paste", (e) => this.onPaste(e));
     on("open-folder", "click", () => this.backend() && this.backend().OpenFolder("downloads").catch((err) => this.showError(err)));
     on("open-log", "click", () => this.backend() && this.backend().OpenFolder("log").catch((err) => this.showError(err)));
     on("check-updates", "click", () => this.checkUpdates());
@@ -878,6 +796,7 @@ const ui = {
     rt.EventsOn("log", (l) => this.log(l));
     rt.EventsOn("speed", (st) => this.renderSpeed(st));
     rt.EventsOn("afterall", (st) => this.renderAfterAll(st));
+    rt.EventsOn("update", (v) => this.showUpdate(v));
     rt.EventsOn("clipboard", (link) => {
       this.el("clip-url").textContent = link;
       this.el("clip-banner").hidden = false;
@@ -905,6 +824,7 @@ const ui = {
       for (const l of this.init.log || []) this.log(l);
       this.renderSpeed(this.init.speed);
       this.renderAfterAll(this.init.afterAll);
+      this.showUpdate(this.init.update);
       this.sendTrayTexts();
       this.el("version").textContent = this.init.version;
       this.listen();

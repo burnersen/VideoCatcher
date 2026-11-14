@@ -186,8 +186,10 @@ input[readonly] { color: var(--muted); }
 
 /* --- downloads: the loud part --- */
 .jobs { display: flex; flex-direction: column; min-height: 0; padding: 18px 22px; }
-.jobs-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.jobs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 10px; }
+#jobs-counts { white-space: nowrap; }
 .jobs-head .spacer { flex: 1; }
+.jobs-head .search { flex: 0 1 150px; min-width: 110px; padding: 3px 8px; font-size: 13px; }
 #jobs-empty { margin-top: 8px; max-width: 46ch; }
 .job-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
 .job {
@@ -209,11 +211,25 @@ input[readonly] { color: var(--muted); }
 .job.done .pct { color: var(--ok); }
 .job.failed .pct, .job.cancelled .pct { color: var(--muted); font-size: 22px; }
 .job .title { grid-column: 2; grid-row: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.job .meta { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+/* .sub is the line under the title: the numbers (.meta, changed in place
+   several times a second) and next to them the site, a button that copies
+   the link. The button is outside .meta so a click on it is never lost to
+   an update. */
+.job .sub { grid-column: 2 / -1; grid-row: 2; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 12.5px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.job .meta { display: contents; }
 .job .meta .num { font-family: var(--num); font-variant-numeric: tabular-nums; }
+.job .meta .warn { color: var(--bad); }
+.job .host, .job .file, .update-note {
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 2px; white-space: normal; text-align: left; overflow-wrap: anywhere;
+}
+.job .host:hover, .job .file:hover, .update-note:hover { filter: none; color: var(--ink); text-decoration-style: solid; }
+.job .files ul { list-style: none; margin: 4px 0 0; padding: 0; max-height: 180px; overflow-y: auto; }
+.job .files li { padding: 1px 0; }
+.job .job-extra { grid-column: 2 / -1; margin-top: 6px; }
 /* Every part has its place: with only a row, the grid put the buttons next
    to the number and pushed the title to the right edge (0.1.0). */
-.job .actions { grid-column: 3; grid-row: 1 / span 2; display: flex; gap: 6px; align-items: start; }
+.job .actions { grid-column: 3; grid-row: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: start; max-width: 440px; }
 .track { display: block; grid-column: 2 / -1; grid-row: 3; height: 6px; margin-top: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 /* The fill is a span: without display:block it is an inline box, which has
    no width or height, and the bar stays empty (0.1.0). */
@@ -233,6 +249,8 @@ input[readonly] { color: var(--muted); }
 /* the row under the head: pause all, speed slider, when all are done */
 .jobs-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; font-size: 13px; }
 .jobs-tools .spacer { flex: 1; }
+/* label and menu stay together; on a narrow window both go to the next line */
+.jobs-tools .after { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; white-space: nowrap; }
 .jobs-tools select { padding: 3px 6px; font-size: 13px; }
 .speed { display: flex; align-items: center; gap: 8px; margin-left: 8px; }
 .speed input[type="range"] { width: 140px; accent-color: var(--signal); }
@@ -266,6 +284,7 @@ input[readonly] { color: var(--muted); }
 .log-list .lvl-error { color: var(--bad); }
 .log-list .lvl-ok { color: var(--ok); }
 .foot { padding: 3px 20px 6px; font-size: 11.5px; color: var(--muted); }
+.update-note { margin-left: 10px; color: var(--ink); font-weight: 600; }
 
 /* --- settings --- */
 .settings {

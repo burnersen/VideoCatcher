@@ -67,6 +67,12 @@ type Job struct {
 	Started   time.Time       `json:"started,omitempty"`
 	Ended     time.Time       `json:"ended,omitempty"`
 	Resumable bool            `json:"resumable,omitempty"` // parts of an earlier run are kept; yt-dlp continues them
+	Size      int64           `json:"size,omitempty"`      // bytes of the downloaded files, when the job is done
+	Elapsed   float64         `json:"elapsed,omitempty"`   // seconds the job ran, all runs together
+	Skipped   int             `json:"skipped,omitempty"`   // a playlist that is done: entries yt-dlp could not download
+	Next      bool            `json:"next,omitempty"`      // waiting, and the user wants it before the other waiting ones
+	Tries     int             `json:"tries,omitempty"`     // runs that ended with trouble on the way to the site
+	RetryAt   time.Time       `json:"retryAt,omitzero"`    // waiting, but not before this time (a new try by itself)
 	// CookieName is the name of the job's cookie file in the cookie folder,
 	// so a paused job still has its login after a restart. Only the name:
 	// the cookies themselves never go into queue.json.
@@ -83,6 +89,12 @@ const (
 	queueFormat    = 1
 )
 
+// retryDelays: after trouble on the way to the site (the connection
+// dropped), a download waits this long and tries again, once per entry.
+// yt-dlp has tried ten times itself by then, so the trouble lasts; more
+// tries than these only keep a dead link in the list for longer.
+var retryDelays = []time.Duration{30 * time.Second, 2 * time.Minute}
+
 type queue struct {
 	r         runner
 	ts        toolSet
@@ -98,7 +110,8 @@ type queue struct {
 	jobs     []*Job
 	cancel   map[string]context.CancelFunc
 	parallel int
-	hold     bool // no new starts, e.g. while yt-dlp is being replaced
+	hold     bool            // no new starts, e.g. while yt-dlp is being replaced
+	delays   []time.Duration // retryDelays; a field so tests need not wait
 	counter  int
 	lastSent map[string]time.Time
 	wg       sync.WaitGroup
@@ -108,7 +121,7 @@ type queue struct {
 }
 
 func newQueue(r runner, ts toolSet, have func(string) bool, dataDir string, logger *slog.Logger) *queue {
-	return &queue{r: r, ts: ts, have: have, logger: logger, parallel: 2,
+	return &queue{r: r, ts: ts, have: have, logger: logger, parallel: 2, delays: retryDelays,
 		tempRoot: filepath.Join(dataDir, "partial"), cookieDir: filepath.Join(dataDir, "cookies"),
 		file: filepath.Join(dataDir, "queue.json"), cancel: map[string]context.CancelFunc{},
 		lastSent: map[string]time.Time{}, pausing: map[string]bool{}}
@@ -152,6 +165,8 @@ func (q *queue) load() error {
 		if j.Status == jobRunning {
 			j.Status, j.Stage, j.Resumable = jobWaiting, "interrupted, continues", true
 		}
+		j.RetryAt = time.Time{} // the wait belonged to the last session; a new start tries at once
+
 		if name := j.CookieName; name != "" && !isFinished(j.Status) {
 			if p := filepath.Join(q.cookieDir, name); filepath.Base(name) == name && fileExists(p) {
 				j.cookieFile = p
@@ -344,34 +359,55 @@ func (q *queue) Running() int {
 	return len(q.cancel)
 }
 
-// Schedule starts waiting jobs while there is room.
+// Schedule starts waiting jobs while there is room: first the ones the user
+// put in front ("next"), then the oldest. A job that waits for a new try
+// by itself is left out until its time has come.
 func (q *queue) Schedule() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.hold || q.closed || !q.have("yt-dlp") {
 		return
 	}
-	for _, j := range q.jobs {
-		if len(q.cancel) >= q.parallel {
-			return
+	now := time.Now()
+	var soonest time.Duration
+	for _, wantNext := range []bool{true, false} {
+		for _, j := range q.jobs {
+			if len(q.cancel) >= q.parallel {
+				return
+			}
+			if j.Status != jobWaiting || j.Next != wantNext {
+				continue
+			}
+			if wait := j.RetryAt.Sub(now); wait > 0 {
+				if soonest == 0 || wait < soonest {
+					soonest = wait
+				}
+				continue
+			}
+			q.startLocked(j)
 		}
-		if j.Status != jobWaiting {
-			continue
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		q.cancel[j.ID] = cancel
-		j.Status, j.Stage, j.Started, j.Error, j.Details = jobRunning, "starting yt-dlp", time.Now(), "", []string{}
-		j.Speed, j.ETA, j.Files = 0, -1, []string{}
-		if j.Resumable {
-			j.Stage = "continuing" // the numbers stay until yt-dlp reports its own
-		} else {
-			j.Percent, j.Done, j.Total = 0, 0, 0
-		}
-		q.saveLocked()
-		c := copyJob(j)
-		q.wg.Add(1)
-		go q.run(ctx, j.ID, c)
 	}
+	if soonest > 0 {
+		time.AfterFunc(soonest, q.Schedule) // one timer too many only looks at the list once more
+	}
+}
+
+// startLocked lets a waiting job run; q.mu is held.
+func (q *queue) startLocked(j *Job) {
+	ctx, cancel := context.WithCancel(context.Background())
+	q.cancel[j.ID] = cancel
+	j.Status, j.Stage, j.Started, j.Error, j.Details = jobRunning, "starting yt-dlp", time.Now(), "", []string{}
+	j.Speed, j.ETA, j.Files, j.Next, j.RetryAt = 0, -1, []string{}, false, time.Time{}
+	j.Size, j.Skipped = 0, 0
+	if j.Resumable {
+		j.Stage = "continuing" // the numbers stay until yt-dlp reports its own
+	} else {
+		j.Percent, j.Done, j.Total = 0, 0, 0
+	}
+	q.saveLocked()
+	c := copyJob(j)
+	q.wg.Add(1)
+	go q.run(ctx, j.ID, c)
 }
 
 // run is one yt-dlp process for one job.
@@ -411,17 +447,22 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 		err = fileError(err, "create the folder for unfinished parts", temp)
 	}
 
-	if err == nil && ctx.Err() == nil && j.Options.CleanNames {
+	// The parts stay for a later run when the job was paused, VideoCatcher
+	// ends, or the job tries again by itself; otherwise they go, however
+	// the job ended.
+	again := err != nil && ctx.Err() == nil && q.triesAgain(id, errLines)
+	// Also after an error: a playlist of which one entry failed still has
+	// its other files, and they get their names like the rest. Not before
+	// another try: yt-dlp skips what is there by its own names.
+	if ctx.Err() == nil && !again && j.Options.CleanNames {
 		q.tidyFiles(id)
 	}
-	// The parts stay for a later run when the job was paused or VideoCatcher
-	// ends; otherwise they go, however the job ended.
-	if !q.keepsParts(id, ctx) {
+	if !again && !q.keepsParts(id, ctx) {
 		if rerr := os.RemoveAll(temp); rerr != nil {
 			q.logger.Warn("cannot remove unfinished parts", "dir", temp, "err", rerr)
 		}
 	}
-	q.finish(id, ctx, err, errLines)
+	q.finish(id, ctx, err, errLines, again)
 }
 
 // secretOf is the password in a proxy URL, or "".
@@ -438,6 +479,15 @@ func (q *queue) keepsParts(id string, ctx context.Context) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return ctx.Err() != nil && (q.closing || q.pausing[id])
+}
+
+// triesAgain says whether a failed run gets another try by itself: the
+// trouble was on the way to the site, and the tries are not used up.
+func (q *queue) triesAgain(id string, errLines []string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	j := q.findLocked(id)
+	return j != nil && !q.closing && j.Tries < len(q.delays) && worthAnotherTry(errLines)
 }
 
 // tidyFiles gives the downloaded files of a job their tidy names (names.go).
@@ -544,7 +594,7 @@ func (q *queue) update(id string, l ytdlpLine) {
 	q.notify(c)
 }
 
-func (q *queue) finish(id string, ctx context.Context, err error, errLines []string) {
+func (q *queue) finish(id string, ctx context.Context, err error, errLines []string, again bool) {
 	q.mu.Lock()
 	delete(q.cancel, id)
 	delete(q.lastSent, id)
@@ -557,6 +607,9 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 	paused := q.pausing[id]
 	delete(q.pausing, id)
 	j.Ended, j.Speed, j.ETA = time.Now(), 0, -1
+	if !j.Started.IsZero() {
+		j.Elapsed += j.Ended.Sub(j.Started).Seconds()
+	}
 	if ctx.Err() != nil && (q.closing || paused) {
 		// Parts and cookies stay for the next run.
 		j.Resumable = true
@@ -573,12 +626,35 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		q.Schedule()
 		return
 	}
+	if again && j.Tries < len(q.delays) {
+		// Parts and cookies stay here too: the next try continues them.
+		wait := q.delays[j.Tries]
+		j.Tries++
+		j.Status, j.Stage, j.Resumable, j.RetryAt = jobWaiting, "site not reached, trying again soon", true, time.Now().Add(wait)
+		q.logger.Warn("download tries again", "id", id, "host", hostOf(j.URL), "try", j.Tries, "in", wait.String(), "ytdlp", firstLine(strings.Join(errLines, "\n")))
+		q.saveLocked()
+		c := copyJob(j)
+		q.mu.Unlock()
+		q.notify(c)
+		q.Schedule()
+		return
+	}
 	q.dropCookiesLocked(j)
 	j.Resumable = false
 	switch {
 	case ctx.Err() != nil:
 		j.Status, j.Stage = jobCancelled, "stopped"
 		q.logger.Info("download stopped", "id", id)
+	case err != nil && j.Options.Playlist == "all" && len(j.Files) > 0:
+		// A playlist of which some entries could not be loaded (private,
+		// deleted, blocked): yt-dlp goes on with the rest and ends with an
+		// error. What was downloaded counts; the entries that failed are
+		// named in the details.
+		j.Status, j.Stage, j.Percent = jobDone, "done, but not every video", 100
+		j.Skipped, j.Tries = max(1, len(errLines)), 0
+		j.Error = errorText(explainYtDlp(errLines, err))
+		j.Size = sizeOf(j.Files)
+		q.logger.Warn("playlist done with errors", "id", id, "host", hostOf(j.URL), "files", len(j.Files), "errors", len(errLines))
 	case err != nil:
 		uerr := explainYtDlp(errLines, err)
 		var ue *UserError
@@ -588,10 +664,11 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		j.Status, j.Stage, j.Error = jobFailed, "failed", errorText(uerr)
 		q.logger.Error("download failed", "id", id, "host", hostOf(j.URL), "err", err, "ytdlp", firstLine(strings.Join(errLines, "\n")))
 	default:
-		j.Status, j.Stage, j.Percent = jobDone, "done", 100
+		j.Status, j.Stage, j.Percent, j.Tries = jobDone, "done", 100, 0
 		if len(j.Files) == 0 {
 			j.Stage = "done (the file was already there)"
 		}
+		j.Size = sizeOf(j.Files)
 		q.logger.Info("download done", "id", id, "files", len(j.Files))
 	}
 	q.saveLocked()
@@ -599,6 +676,18 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 	q.mu.Unlock()
 	q.notify(c)
 	q.Schedule()
+}
+
+// sizeOf adds up the sizes of the files a job downloaded. A file that is
+// gone already (moved by the user) counts nothing.
+func sizeOf(files []string) int64 {
+	var n int64
+	for _, f := range files {
+		if info, err := os.Stat(f); err == nil && info.Mode().IsRegular() {
+			n += info.Size()
+		}
+	}
+	return n
 }
 
 // dropCookiesLocked deletes the cookie file of a job; q.mu is held.
@@ -655,7 +744,7 @@ func (q *queue) Resume(id string) error {
 		if j.Status != jobPaused {
 			return false
 		}
-		j.Status, j.Stage = jobWaiting, "waiting"
+		j.Status, j.Stage, j.RetryAt = jobWaiting, "waiting", time.Time{}
 		return true
 	})
 }
@@ -719,10 +808,84 @@ func (q *queue) Retry(id string) error {
 		if !isFinished(j.Status) {
 			return false
 		}
-		j.Status, j.Stage, j.Error, j.Percent, j.Done, j.Total = jobWaiting, "waiting", "", 0, 0, 0
-		q.dropPartsLocked(j) // a new try starts clean
+		q.againLocked(j)
 		return true
 	})
+}
+
+// againLocked puts a finished job back into the line; q.mu is held.
+func (q *queue) againLocked(j *Job) {
+	j.Status, j.Stage, j.Error, j.Percent, j.Done, j.Total = jobWaiting, "waiting", "", 0, 0, 0
+	j.Tries, j.RetryAt, j.Elapsed, j.Size, j.Skipped = 0, time.Time{}, 0, 0, 0
+	q.dropPartsLocked(j) // a new try starts clean
+}
+
+// RetryFailed puts every failed job back into the line and says how many.
+func (q *queue) RetryFailed() int {
+	q.mu.Lock()
+	var again []Job
+	for _, j := range q.jobs {
+		if j.Status == jobFailed {
+			q.againLocked(j)
+			again = append(again, copyJob(j))
+		}
+	}
+	if len(again) > 0 {
+		q.saveLocked()
+	}
+	q.mu.Unlock()
+	for _, c := range again {
+		q.notify(c)
+	}
+	q.Schedule()
+	return len(again)
+}
+
+// StartNext puts a waiting job in front of the other waiting ones: it gets
+// the next free place. A job that waits for a new try by itself tries now.
+func (q *queue) StartNext(id string) error {
+	return q.setStatus(id, func(j *Job) bool {
+		if j.Status != jobWaiting {
+			return false
+		}
+		j.Next, j.RetryAt, j.Stage = true, time.Time{}, "next"
+		return true
+	})
+}
+
+// Known finds the newest job with this link that is not failed or stopped:
+// one that still waits or runs, or one that is done. The window asks
+// before it adds a link a second time.
+func (q *queue) Known(link string) (Job, bool) {
+	u, err := checkURL(link)
+	if err != nil {
+		return Job{}, false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i := len(q.jobs) - 1; i >= 0; i-- {
+		if j := q.jobs[i]; j.URL == u && j.Status != jobFailed && j.Status != jobCancelled {
+			return copyJob(j), true
+		}
+	}
+	return Job{}, false
+}
+
+// Progress is what the window title shows: how many downloads run, and how
+// far they are on average.
+func (q *queue) Progress() (running int, percent float64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, j := range q.jobs {
+		if j.Status == jobRunning {
+			running++
+			percent += j.Percent
+		}
+	}
+	if running > 0 {
+		percent /= float64(running)
+	}
+	return running, percent
 }
 
 // Confirm lets a job from outside start.

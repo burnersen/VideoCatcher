@@ -4,7 +4,7 @@
 //
 // check_harness.js runs the page's own scripts without a browser.
 //
-// It loads the shipped dist/i18n.js and dist/app.js, not copies: a copy
+// It loads the shipped dist/i18n.js, dist/app.js and dist/jobs.js, not copies: a copy
 // would drift and then prove nothing. Elements are stand-ins that remember
 // what was written to them, so a check can read back what the window would
 // show. Run a check with "node app_check.js"; it ends with exit code 1 on
@@ -57,13 +57,13 @@ function loadPage(backend, language) {
     setTimeout: (fn) => { timers.push(fn); return timers.length; },
     clearTimeout: () => {},
   });
-  for (const file of ["i18n.js", "app.js"]) {
+  for (const file of ["i18n.js", "app.js", "jobs.js"]) {
     vm.runInContext(fs.readFileSync(path.join(dist, file), "utf8"), context, { filename: file });
   }
   const runTimers = async () => { while (timers.length) await timers.shift()(); };
   return {
     ui: context.kitUI, formatSize: context.kitFormatSize, esc: context.vcEsc, t: context.vcT,
-    texts: context.vcTexts, formatDuration: context.vcFormatDuration, baseName: context.vcBaseName, clipLong: context.vcClipLong, linksIn: context.vcLinksIn,
+    texts: context.vcTexts, formatDuration: context.vcFormatDuration, baseName: context.vcBaseName, clipLong: context.vcClipLong, linksIn: context.vcLinksIn, formatWhen: context.vcFormatWhen,
     elements, el: document.getElementById, docListeners, events, runTimers,
   };
 }

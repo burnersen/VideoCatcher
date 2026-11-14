@@ -64,6 +64,10 @@ const (
 	wmTrayShow     = wmUser + 2 // from other threads: show the icon
 	wmTrayHide     = wmUser + 3
 	wmTrayTip      = wmUser + 4
+	wmTrayNews     = wmUser + 6 // from other threads: show a balloon
+
+	// shellapi.h: sent as a click on the icon when the user clicks a balloon.
+	ninBalloonUserClick = wmUser + 5
 
 	nimAdd     = 0
 	nimModify  = 1
@@ -135,6 +139,13 @@ type TrayTexts struct {
 	Running      string `json:"running"`      // tooltip while downloads run, "{n}" is their number
 	BalloonTitle string `json:"balloonTitle"` // once per run, when the window goes into the tray
 	BalloonText  string `json:"balloonText"`
+	// What happened while the window was away (notify.go): "{d}" downloads
+	// done, "{f}" failed, "{t}" the title of the one that failed.
+	AllDoneTitle string `json:"allDoneTitle"`
+	AllDoneText  string `json:"allDoneText"`
+	AllDoneBad   string `json:"allDoneBad"` // the text when some failed
+	FailedTitle  string `json:"failedTitle"`
+	FailedText   string `json:"failedText"`
 }
 
 type trayIcon struct {
@@ -143,7 +154,8 @@ type trayIcon struct {
 	icon    uintptr
 	texts   TrayTexts
 	tip     string
-	balloon bool // show the balloon with the next Show
+	balloon bool      // show the balloon with the next Show
+	news    [2]string // title and text of the next balloon (Notify)
 	visible bool
 	onOpen  func()
 	onQuit  func()
@@ -161,7 +173,7 @@ var (
 
 func newTray(onOpen, onQuit func()) (*trayIcon, error) {
 	t := &trayIcon{onOpen: onOpen, onQuit: onQuit, done: make(chan struct{}),
-		texts: TrayTexts{Open: "Open " + displayName, Quit: "Quit", Running: displayName + ": {n} downloads"}}
+		texts: defaultTrayTexts()}
 	ready := make(chan error, 1)
 	go t.loop(ready)
 	if err := <-ready; err != nil {
@@ -251,9 +263,12 @@ func trayWindowProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case msg == wmTrayTip:
 		t.modifyTip()
 		return 1
+	case msg == wmTrayNews:
+		t.showNews()
+		return 1
 	case msg == wmTrayCallback:
 		switch lparam & 0xffff {
-		case wmLButtonUp:
+		case wmLButtonUp, ninBalloonUserClick:
 			go t.onOpen()
 		case wmRButtonUp:
 			t.menu()
@@ -345,6 +360,20 @@ func (t *trayIcon) modifyTip() {
 	procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&d))) // ignore: an old tooltip is no harm
 }
 
+// showNews puts a balloon on the icon that is already there.
+func (t *trayIcon) showNews() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.visible || t.news[1] == "" {
+		return
+	}
+	d := t.dataLocked(nifInfo)
+	d.DwInfoFlags = niifInfo
+	putUTF16(d.SzInfoTitle[:], t.news[0])
+	putUTF16(d.SzInfo[:], t.news[1])
+	procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&d))) // ignore: the list in the window says the same
+}
+
 func (t *trayIcon) menu() {
 	t.mu.Lock()
 	open := windows.StringToUTF16(t.texts.Open)
@@ -404,6 +433,18 @@ func (t *trayIcon) SetTip(tip string) {
 	t.mu.Unlock()
 	if !same && visible {
 		procPostMessageW.Call(t.hwnd, wmTrayTip, 0, 0)
+	}
+}
+
+// Notify shows a balloon while the icon is shown (the window is away). A
+// click on it opens the window.
+func (t *trayIcon) Notify(title, text string) {
+	t.mu.Lock()
+	t.news = [2]string{title, text}
+	visible := t.visible
+	t.mu.Unlock()
+	if visible && text != "" {
+		procPostMessageW.Call(t.hwnd, wmTrayNews, 0, 0)
 	}
 }
 

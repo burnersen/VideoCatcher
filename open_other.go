@@ -18,6 +18,15 @@ import (
 
 func showInFolder(path string) error { return openFolder(filepath.Dir(path)) }
 
+func openFile(path string) error {
+	cmd := exec.Command("xdg-open", path)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start xdg-open: %w", err)
+	}
+	go cmd.Wait() // ignore: the player runs on its own
+	return nil
+}
+
 func openFolder(dir string) error {
 	cmd := exec.Command("xdg-open", dir)
 	if err := cmd.Start(); err != nil {

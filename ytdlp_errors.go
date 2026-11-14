@@ -18,6 +18,9 @@ type errorRule struct {
 	any  []string // the error matches if its lower case text contains one of these
 	msg  string
 	hint string
+	// again: the trouble is on the way to the site, not with the video.
+	// The queue tries such a download again by itself (queue.go).
+	again bool
 }
 
 // The first matching rule wins, so the specific ones come first. The texts
@@ -67,7 +70,7 @@ var errorRules = []errorRule{
 		hint: "Choose another folder, or check that no other program has the file open."},
 	{any: []string{"unable to download webpage", "getaddrinfo failed", "name or service not known", "timed out", "connection reset", "connection refused", "network is unreachable", "temporary failure in name resolution", "ssl"},
 		msg:  "The site could not be reached",
-		hint: "Check the internet connection and try again."},
+		hint: "Check the internet connection and try again.", again: true},
 }
 
 // explainYtDlp makes one UserError out of the error lines of a run. The
@@ -95,6 +98,25 @@ func explainYtDlp(errorLines []string, exitErr error) error {
 		hint = "yt-dlp says: " + short
 	}
 	return userError(errors.New(cause), "yt-dlp could not download this", hint)
+}
+
+// worthAnotherTry says whether a failed run ended for a reason that may be
+// gone a moment later (the connection dropped, the name was not found).
+// The first matching rule decides, like in explainYtDlp: "HTTP Error 404"
+// in an "unable to download webpage" line is no reason to try again.
+func worthAnotherTry(errorLines []string) bool {
+	all := strings.ToLower(strings.Join(errorLines, "\n"))
+	if all == "" {
+		return false
+	}
+	for _, r := range errorRules {
+		for _, s := range r.any {
+			if strings.Contains(all, s) {
+				return r.again
+			}
+		}
+	}
+	return false
 }
 
 func firstLine(s string) string {
