@@ -42,7 +42,11 @@ func readFileURL(t *testing.T, link string) string {
 	if err != nil || u.Scheme != "file" {
 		t.Fatalf("not a file link: %q", link)
 	}
-	data, err := os.ReadFile(filepath.FromSlash(u.Path))
+	p := u.Path
+	if len(p) > 2 && p[0] == '/' && p[2] == ':' {
+		p = p[1:] // "/C:/Users/..." is "C:/Users/..." on Windows
+	}
+	data, err := os.ReadFile(filepath.FromSlash(p))
 	if err != nil {
 		t.Fatal(err)
 	}
