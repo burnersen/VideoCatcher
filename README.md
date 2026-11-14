@@ -78,6 +78,10 @@ It finds them in four ways, because sites hide their videos differently: by the 
 
 **Sites with a login or a token:** tick **Send the site's login (cookies) along** in the extension's window. The download then goes with the cookies of the page, of the video and of an embedded player (also from a private window or a Firefox container), and as the same browser. For a listed video the extension also passes on what the player sent to get it: where the request came from, a login in a header, the player's own headers. Links like these are often only good for a few minutes, so send a video soon after starting it; if the site refuses the link all the same, Video-Catcher tries the page itself before it gives up ([how it works](docs/browser-bridge.md#links-with-a-token)).
 
+**Sites behind a bot check (Cloudflare):** such a site lets browsers in and turns everything else away. Video-Catcher then tries once more, answering the way your browser does, and the extension passes along the proof that the site let your browser in (a cookie of the bot check, not a login). Open the page until the video plays, then send it ([how it works](docs/browser-bridge.md#sites-behind-a-bot-check)).
+
+**A video is not found:** play it, click **Copy a report** in the extension's window and add the text to an [issue](https://github.com/burnersen/VideoCatcher/issues). It lists what the extension saw on the page, with the links shortened so that no key and no login is in it.
+
 **Install it once:**
 
 1. In Video-Catcher, open **Settings** and turn on **Allow the browser extension**. This tells the browsers where Video-Catcher is (only for your Windows user, no administrator rights).
@@ -86,7 +90,7 @@ It finds them in four ways, because sites hide their videos differently: by the 
    - **Chrome and Edge:** unpack `VideoCatcher-extension-chromium.zip` into a folder that stays (for example `Documents\VideoCatcher-extension`). Open `chrome://extensions` (Edge: `edge://extensions`), turn on **Developer mode**, click **Load unpacked** and choose that folder.
 3. Click the puzzle piece in the toolbar and pin Video-Catcher. The button should say "Connected to Video-Catcher".
 
-**What it may do, and why:** see the requests of the pages and look into the pages themselves (to find videos; it reads and changes nothing on them), keep a list per tab in the browser's memory until the tab or browser closes, add a right-click menu, read a site's cookies only when you tick "Send the site's login along", remember for a listed video the headers its request had (they leave the browser only with that video, when you click), and talk to Video-Catcher on this PC. It sends nothing to the internet and nothing anywhere before you click. If you moved `VideoCatcher.exe`, start it once from its new place; it updates what the browsers know. After installing or updating the extension, reload the pages that were already open.
+**What it may do, and why:** see the requests of the pages and look into the pages themselves (to find videos; it reads and changes nothing on them), keep a list per tab in the browser's memory until the tab or browser closes, add a right-click menu, read a site's cookies only when you tick "Send the site's login along" (without the tick, only the cookies of a bot check like Cloudflare's, which say "this browser was let in" and are no login), remember for a listed video the headers its request had (they leave the browser only with that video, when you click), and talk to Video-Catcher on this PC. It sends nothing to the internet and nothing anywhere before you click. If you moved `VideoCatcher.exe`, start it once from its new place; it updates what the browsers know. After installing or updating the extension, reload the pages that were already open.
 
 The extension cannot get around DRM, and it cannot download what a site keeps from you.
 

@@ -20,7 +20,8 @@
 if (typeof globalThis.vc === "undefined" && typeof importScripts === "function") {
   importScripts("common.js");
 }
-const { api, classify, addItem, pageItems, sendToApp, withLogin, buildMessage, totalSize, header, sentHeaders } = globalThis.vc;
+const { api, classify, addItem, pageItems, sendToApp, withLogin, withPass, buildMessage, totalSize, header, sentHeaders,
+  traceLine, pageNotes, reportText, maxTrace, maxNotes } = globalThis.vc;
 
 const tabKey = (tabId) => "tab:" + tabId;
 
@@ -30,6 +31,16 @@ const tabKey = (tabId) => "tab:" + tabId;
 // the headers of a request that was running at that moment (the frame's
 // address is the referer then).
 const sent = new Map();
+
+// For "Copy a report" in the popup: the last requests of each tab,
+// shortened (traceLine), and what page.js noted about the player. Only in
+// memory, never stored and never sent: gone when the worker stops, the tab
+// closes or goes to another page.
+const traces = new Map();
+function traceOf(tabId) {
+  if (!traces.has(tabId)) traces.set(tabId, { requests: [], notes: [] });
+  return traces.get(tabId);
+}
 
 // Writes to storage are queued per tab: two answers arriving at the same
 // time must not overwrite each other's item.
@@ -85,6 +96,11 @@ function onHeadersReceived(details) {
   const was = sent.get(details.requestId);
   sent.delete(details.requestId);
   if (details.tabId < 0) return;
+  if (details.type !== "stylesheet" && details.type !== "font") {
+    const t = traceOf(details.tabId);
+    t.requests.push(traceLine(details));
+    if (t.requests.length > maxTrace) t.requests.shift();
+  }
   const kind = classify(details.url, details.type, details.responseHeaders);
   if (kind) remember(details, kind, was);
 }
@@ -92,9 +108,23 @@ function onHeadersReceived(details) {
 // What a page reports about itself (content.js): streams found in the
 // answers, videos named in the markup, a video playing from memory (blob),
 // a player in a frame.
-function onPageMessage(message, sender) {
-  if (!message || message.type !== "vc-found" || sender.id !== api.runtime.id || !sender.tab) return;
+function onPageMessage(message, sender, sendResponse) {
+  if (!message || sender.id !== api.runtime.id) return;
+  if (message.type === "vc-report" && !sender.tab && Number.isInteger(message.tabId)) {
+    // The popup asks for the report of its tab.
+    readTab(message.tabId).then((tab) => {
+      const t = traces.get(message.tabId) || { requests: [], notes: [] };
+      sendResponse({ text: reportText({ version: api.runtime.getManifest().version, browser: globalThis.navigator && globalThis.navigator.userAgent,
+        pageUrl: message.pageUrl, blob: tab.blob === true, items: tab.items, notes: t.notes, requests: t.requests }) });
+    }, () => sendResponse({ text: "" }));
+    return true; // the answer comes later
+  }
+  if (message.type !== "vc-found" || !sender.tab) return;
   const tabId = sender.tab.id;
+  for (const n of pageNotes(message)) {
+    const t = traceOf(tabId);
+    if (t.notes.length < maxNotes && !t.notes.includes(n)) t.notes.push(n);
+  }
   const items = pageItems(message, { url: sender.url || "", frameId: sender.frameId || 0 }, Date.now());
   const blob = message.blob === true;
   if (items.length === 0 && !blob) return;
@@ -111,6 +141,7 @@ api.runtime.onMessage.addListener(onPageMessage);
 // A new page in the tab starts a new list.
 function onBeforeRequest(details) {
   if (details.type !== "main_frame" || details.tabId < 0) return;
+  traces.delete(details.tabId);
   withTab(details.tabId, async () => {
     await api.storage.session.remove(tabKey(details.tabId));
     showCount(details.tabId, 0);
@@ -130,6 +161,7 @@ api.webRequest.onHeadersReceived.addListener(onHeadersReceived, filter, ["respon
 api.webRequest.onBeforeRequest.addListener(onBeforeRequest, { urls: ["<all_urls>"], types: ["main_frame"] });
 
 api.tabs.onRemoved.addListener((tabId) => {
+  traces.delete(tabId);
   api.storage.session.remove(tabKey(tabId)).catch(() => {}); // already gone is fine
 });
 
@@ -156,6 +188,7 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
   // own; the page goes instead, and the popup's list has the stream.
   const settings = await api.storage.local.get("withCookies");
   if (settings.withCookies) await withLogin(msg, tab, { frameUrl: info.frameUrl });
+  else await withPass(msg, tab, { frameUrl: info.frameUrl });
   const reply = await sendToApp(msg);
   if (!reply.ok) {
     showCount(tab.id, 0);

@@ -12,7 +12,7 @@
   "sent": { "message": "An Video-Catcher geschickt" },
   "sending": { "message": "Wird geschickt ..." },
   "withCookies": { "message": "Anmeldung der Seite (Cookies) mitschicken" },
-  "withCookiesHint": { "message": "Nur für Videos, die du nur angemeldet sehen kannst. Die Cookies gehen an Video-Catcher auf diesem PC und sonst nirgendwohin." },
+  "withCookiesHint": { "message": "Nur für Videos, die du nur angemeldet sehen kannst. Die Cookies gehen an Video-Catcher auf diesem PC und sonst nirgendwohin. Ohne Haken geht nur der Nachweis mit, dass die Bot-Prüfung einer Seite (Cloudflare) deinen Browser durchgelassen hat." },
   "connected": { "message": "Verbunden mit Video-Catcher $1" },
   "notConnected": { "message": "Video-Catcher ist nicht verbunden. Öffne in Video-Catcher die Einstellungen und schalte \"Browser-Erweiterung erlauben\" ein. Video-Catcher muss Version 0.2.0 oder neuer sein." },
   "allowSites": { "message": "Zugriff auf alle Seiten erlauben" },
@@ -28,8 +28,12 @@
   "kindAudio": { "message": "Audiodatei" },
   "inFrame": { "message": "von $1" },
   "kindIsm": { "message": "Smooth-Streaming-Stream" },
-  "kindEmbed": { "message": "Eingebetteter Player: seine Seite wird geschickt, für Seiten, die yt-dlp kennt" },
+  "kindEmbed": { "message": "Eingebetteter Player: seine Seite wird geschickt. Das klappt nur bei Seiten, die yt-dlp kennt; ein Stream aus der Liste ist die bessere Wahl" },
   "allQualities": { "message": "alle Qualitäten" },
   "oneQuality": { "message": "eine Qualität" },
-  "hiddenVideo": { "message": "Hier läuft ein Video, aber die Seite hält ihren Stream verborgen. Probier \"Diese Seite schicken\" oder einen Player aus der Liste unten. War die Seite schon offen, bevor die Erweiterung installiert oder erneuert wurde, lade sie neu und starte das Video noch mal." }
+  "hiddenVideo": { "message": "Hier läuft ein Video, aber die Seite hält ihren Stream verborgen. \"Diese Seite schicken\" oder ein Player aus der Liste unten klappen nur bei Seiten, die yt-dlp kennt. War die Seite schon offen, bevor die Erweiterung installiert oder erneuert wurde, lade sie neu und starte das Video noch mal. Immer noch nichts? Nimm unten \"Bericht kopieren\"." },
+  "report": { "message": "Bericht kopieren" },
+  "reportHint": { "message": "Video nicht gefunden? Spiel es ab, kopier dann den Bericht und häng ihn an eine Meldung. Links darin sind gekürzt, Anmeldungen bleiben draußen." },
+  "reportCopied": { "message": "Kopiert. Füg ihn in deine Meldung ein." },
+  "reportFailed": { "message": "Der Bericht ließ sich nicht kopieren. Lade die Seite neu, starte das Video und probier es noch mal." }
 }
