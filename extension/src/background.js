@@ -4,7 +4,10 @@
 //
 // Watches what the pages load and keeps, per tab, the videos it saw: HLS
 // and DASH streams and video files, also those inside embedded players
-// (iframes), which a page link alone would not reveal. Nothing is sent
+// (iframes), which a page link alone would not reveal. What the requests
+// do not show comes from the pages themselves: page.js reads the answers a
+// player gets (a stream behind a link and a type that say nothing),
+// content.js the videos the page names. Nothing is sent
 // anywhere until the user clicks: the list stays in the browser's session
 // storage and is gone when the browser closes.
 //
@@ -17,7 +20,7 @@
 if (typeof globalThis.vc === "undefined" && typeof importScripts === "function") {
   importScripts("common.js");
 }
-const { api, classify, addItem, sendToApp, cookiesFor, buildMessage, totalSize, header } = globalThis.vc;
+const { api, classify, addItem, pageItems, sendToApp, cookiesFor, buildMessage, totalSize, header } = globalThis.vc;
 
 const tabKey = (tabId) => "tab:" + tabId;
 
@@ -55,6 +58,7 @@ function remember(details, kind, referer) {
   const item = {
     url: details.url,
     kind,
+    via: "net",
     size: totalSize(details.responseHeaders),
     referer: referer || details.documentUrl || "",
     frameUrl,
@@ -82,6 +86,25 @@ function onHeadersReceived(details) {
   const kind = classify(details.url, details.type, details.responseHeaders);
   if (kind) remember(details, kind, ref);
 }
+
+// What a page reports about itself (content.js): streams found in the
+// answers, videos named in the markup, a video playing from memory (blob),
+// a player in a frame.
+function onPageMessage(message, sender) {
+  if (!message || message.type !== "vc-found" || sender.id !== api.runtime.id || !sender.tab) return;
+  const tabId = sender.tab.id;
+  const items = pageItems(message, { url: sender.url || "", frameId: sender.frameId || 0 }, Date.now());
+  const blob = message.blob === true;
+  if (items.length === 0 && !blob) return;
+  withTab(tabId, async () => {
+    const tab = await readTab(tabId);
+    for (const item of items) tab.items = addItem(tab.items, item);
+    if (blob) tab.blob = true;
+    await api.storage.session.set({ [tabKey(tabId)]: tab });
+    showCount(tabId, tab.items.length);
+  });
+}
+api.runtime.onMessage.addListener(onPageMessage);
 
 // A new page in the tab starts a new list.
 function onBeforeRequest(details) {

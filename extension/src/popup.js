@@ -7,7 +7,7 @@
 // as text (textContent), never as markup.
 "use strict";
 
-const { api, sendToApp, cookiesFor, buildMessage, hostOf, shortPath, formatSize } = globalThis.vc;
+const { api, sendToApp, cookiesFor, buildMessage, hostOf, shortPath, formatSize, formatDuration } = globalThis.vc;
 
 const msg = (key, ...subs) => api.i18n.getMessage(key, subs.map(String)) || key;
 const $ = (id) => document.getElementById(id);
@@ -69,7 +69,22 @@ const popup = {
   },
 
   kindLabel(kind) {
-    return { hls: msg("kindHls"), dash: msg("kindDash"), video: msg("kindVideo"), audio: msg("kindAudio") }[kind] || kind;
+    return {
+      hls: msg("kindHls"), dash: msg("kindDash"), ism: msg("kindIsm"), video: msg("kindVideo"), audio: msg("kindAudio"),
+      embed: msg("kindEmbed"),
+    }[kind] || kind;
+  },
+
+  // details says what is known about a found video, after its host: for an
+  // HLS stream whether it holds all qualities or one, how long it is, and
+  // for a file its size (for a stream that would be the size of its list).
+  details(item) {
+    const parts = [hostOf(item.url)];
+    if (item.kind === "hls" && item.master === true) parts.push(msg("allQualities"));
+    if (item.kind === "hls" && item.master === false) parts.push(msg("oneQuality"));
+    parts.push(formatDuration(item.duration));
+    if (item.kind === "video" || item.kind === "audio") parts.push(formatSize(item.size));
+    return parts.filter(Boolean).join(", ");
   },
 
   itemRow(item) {
@@ -79,11 +94,9 @@ const popup = {
     what.className = "what";
     const kind = document.createElement("span");
     kind.className = "kind";
-    kind.textContent = item.kind.toUpperCase();
+    kind.textContent = item.kind === "embed" ? "PLAYER" : item.kind.toUpperCase();
     kind.title = this.kindLabel(item.kind);
-    // A size only for files: for a stream it is the size of its list.
-    const size = item.kind === "video" || item.kind === "audio" ? formatSize(item.size) : "";
-    what.append(kind, document.createTextNode([hostOf(item.url), size].filter(Boolean).join(", ")));
+    what.append(kind, document.createTextNode(this.details(item)));
     const where = document.createElement("span");
     where.className = "where";
     where.textContent = [shortPath(item.url), item.frameUrl ? msg("inFrame", hostOf(item.frameUrl)) : ""].filter(Boolean).join("  ");
@@ -103,8 +116,13 @@ const popup = {
     list.textContent = "";
     if (!this.tab) return;
     const got = await api.storage.session.get("tab:" + this.tab.id);
-    const items = (got["tab:" + this.tab.id] || { items: [] }).items;
-    $("nothing").hidden = items.length > 0;
+    const tab = got["tab:" + this.tab.id] || { items: [] };
+    const items = tab.items || [];
+    // A video that plays from memory and no stream to it: say so instead of
+    // "nothing found", the page itself or a listed player may still work.
+    const hidden = tab.blob === true && !items.some((x) => x.kind !== "embed");
+    $("hidden-video").hidden = !hidden;
+    $("nothing").hidden = items.length > 0 || hidden;
     for (const item of items) list.append(this.itemRow(item));
   },
 

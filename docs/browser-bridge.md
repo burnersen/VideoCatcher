@@ -63,6 +63,20 @@ Software\Mozilla\NativeMessagingHosts\de.burnersen.videocatcher
 Turning it off removes the keys. A copy of `VideoCatcher.exe` in another
 folder takes the keys over at its start.
 
+### How the extension finds videos
+
+| Where | What it sees |
+|---|---|
+| `background.js` (`webRequest`) | every request of a tab: streams and files by the end of the address, the type of the answer, a stream named behind the `?`, the file name of a download; with the Referer the request really had |
+| `page.js` (inside the page, world `MAIN`) | the start of what `fetch` and `XMLHttpRequest` bring: an answer that begins like an HLS list, a DASH or a Smooth Streaming manifest is a stream, whatever its address and type say. It also knows whether an HLS list holds all qualities or one, and how long that one is |
+| `content.js` (next to the page) | the videos the page names (`<video>`, `<audio>`, `<source>`, also in open shadow trees), a video playing from memory (`blob:`), and a player inside a frame, whose address is listed as a page to send |
+
+`page.js` tells `content.js` only the link (an event on the document),
+`content.js` tells `background.js`, which checks every field again
+(`pageItems` in `common.js`): a page can make such events up, and all that
+may come of it is a link in a list the user reads. One link found in several
+ways is one entry; what read the answer counts more than the address.
+
 ### Messages
 
 Each message is 4 bytes of length (little endian) and then JSON, both ways.

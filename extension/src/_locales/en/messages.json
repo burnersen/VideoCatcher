@@ -7,7 +7,7 @@
   "sendPage": { "message": "Send this page" },
   "sendPageHint": { "message": "Best for sites yt-dlp knows (YouTube, Vimeo, ARD, many more)." },
   "found": { "message": "Videos found on this page" },
-  "nothingFound": { "message": "Nothing found yet. Start the video on the page; if the page offers several players or hosts, click one. Then it shows up here." },
+  "nothingFound": { "message": "Nothing found yet. Start the video on the page; if the page offers several players or hosts, click one. Then it shows up here. If the page was open before the extension was installed or updated, reload it first." },
   "send": { "message": "Download" },
   "sent": { "message": "Sent to Video-Catcher" },
   "sending": { "message": "Sending ..." },
@@ -26,5 +26,10 @@
   "kindDash": { "message": "DASH stream" },
   "kindVideo": { "message": "Video file" },
   "kindAudio": { "message": "Audio file" },
-  "inFrame": { "message": "from $1" }
+  "inFrame": { "message": "from $1" },
+  "kindIsm": { "message": "Smooth Streaming stream" },
+  "kindEmbed": { "message": "Embedded player: its page is sent, for the sites yt-dlp knows" },
+  "allQualities": { "message": "all qualities" },
+  "oneQuality": { "message": "one quality" },
+  "hiddenVideo": { "message": "A video is playing here, but the page keeps its stream out of sight. Try \"Send this page\", or a player listed below. If you opened the page before the extension was installed or updated, reload it and start the video again." }
 }
