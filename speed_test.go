@@ -7,8 +7,10 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -212,5 +214,30 @@ func TestSpeedControlPercentOfPeak(t *testing.T) {
 	s.SetPercent(0)
 	if s.State().Percent != 1 {
 		t.Fatal("percent below 1 accepted")
+	}
+}
+
+// A site that cannot be reached for a moment must not cost yt-dlp a retry.
+func TestRelayDialsAgain(t *testing.T) {
+	old := relayDialPauses
+	relayDialPauses = []time.Duration{time.Millisecond, time.Millisecond}
+	defer func() { relayDialPauses = old }()
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	calls := 0
+	r := &relay{dial: func(context.Context, string, string) (net.Conn, error) {
+		if calls++; calls < 3 {
+			return nil, errors.New("refused")
+		}
+		return a, nil
+	}}
+	c, err := r.dialPatiently(context.Background(), "example.com:443")
+	if err != nil || c != a || calls != 3 {
+		t.Fatalf("got %v, %v after %d calls", c, err, calls)
+	}
+	r.dial = func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("down") }
+	if _, err := r.dialPatiently(context.Background(), "example.com:443"); err == nil {
+		t.Fatal("a site that stays down must fail")
 	}
 }
