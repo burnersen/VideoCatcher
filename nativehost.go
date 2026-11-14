@@ -74,6 +74,9 @@ type nativeMessage struct {
 	Referer  string `json:"referer"`
 	FileName string `json:"fileName"` // a name for the file, from the page title; may be empty
 	Cookies  string `json:"cookies"`  // Netscape format, only when the user asked for it
+	// Headers the browser sent for the video (headers.go); checked by the
+	// window when it reads the request.
+	Headers map[string]string `json:"headers"`
 }
 
 // nativeReply is what the extension gets back.
@@ -154,6 +157,7 @@ func (h *nativeHost) add(m nativeMessage) (string, error) {
 		V: requestVersion, URL: link, Source: "extension",
 		PageURL: optionalURL(m.PageURL), Referer: optionalURL(m.Referer),
 		Title: clip(m.Title, maxTitleLen), FileName: clip(m.FileName, maxFileNameLen), Cookies: m.Cookies,
+		Headers: m.Headers,
 	}
 	data, err := json.Marshal(req)
 	if err != nil {

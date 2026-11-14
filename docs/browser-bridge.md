@@ -84,7 +84,7 @@ Each message is 4 bytes of length (little endian) and then JSON, both ways.
 | From the extension | Reply |
 |---|---|
 | `{"type":"ping"}` | `{"ok":true,"version":"0.2.0"}` |
-| `{"type":"add","url":...,"pageUrl":...,"title":...,"referer":...,"fileName":...,"cookies":...}` | `{"ok":true}` or `{"ok":false,"code":"bad-link"\|"start"\|"bad-message"\|"inbox","error":"..."}` |
+| `{"type":"add","url":...,"pageUrl":...,"title":...,"referer":...,"fileName":...,"cookies":...,"headers":{...}}` | `{"ok":true}` or `{"ok":false,"code":"bad-link"\|"start"\|"bad-message"\|"inbox","error":"..."}` |
 
 `code` `start` means the window could not be started; the request stays in
 the inbox and is taken at the next start.
@@ -112,7 +112,8 @@ The file holds, in version 1:
   "referer": "https://example.org/",
   "fileName": "Title of the page",
   "source": "extension",
-  "cookies": "# Netscape HTTP Cookie File\n..."
+  "cookies": "# Netscape HTTP Cookie File\n...",
+  "headers": { "User-Agent": "Mozilla/5.0 ...", "Origin": "https://example.org", "Authorization": "Bearer ..." }
 }
 ```
 
@@ -120,13 +121,54 @@ The file holds, in version 1:
 |---|---|
 | `v` | Format version. Anything but 1 is refused. |
 | `url` | The link for yt-dlp: a page or a media stream (m3u8, mpd, mp4). http and https only. |
-| `pageUrl`, `title`, `referer` | Optional. The title is shown in the list, the referer is sent with the download (some sites need it for streams). |
+| `pageUrl`, `title`, `referer` | Optional. The title is shown in the list, the referer is sent with the download (some sites need it for streams). When the site refuses `url` (see "Links with a token" below), `pageUrl` is tried instead. |
 | `fileName` | Optional. A name for the file without ending; characters Windows does not allow become spaces. The extension sends the page title for streams, whose links have no name of their own. Not used for a whole playlist. |
 | `source` | `extension` starts the download like a link from the window. Anything else waits for the user's OK. |
 | `cookies` | Optional. The cookies of the site in the Netscape cookie file format, for videos you only see when logged in. |
+| `headers` | Optional. Request headers the browser sent for the video, name to value (see below). Added in 0.6.0; older versions ignore the field. |
 
 **Cookies** are logins. VideoCatcher writes them into a file of its own for
 exactly one download (`%LOCALAPPDATA%\VideoCatcher\cookies\`, a folder only
 your user can read), passes the file to yt-dlp and deletes it when the
 download ends, however it ends. They never go into the log, the download list
 or a command line. Leftover files from a crash are deleted after a day.
+
+The extension takes the cookies of the video's address, of the page and of
+the frame the player sits in, from the cookie store of the tab (a private
+window and a Firefox container have their own). It also asks for the cookies
+the browser keeps apart for an embedded player (partitioned cookies): that
+player is often the one that holds the login.
+
+### Links with a token
+
+Many sites hand the player a link that is only good for a short time, for
+one login or for one browser: a token in the address, a login in a request
+header, a check of where the request comes from. Three things help such a
+download through:
+
+1. **Request headers.** For every video it lists, the extension remembers
+   the headers its request had in the browser, and sends them along:
+   `User-Agent`, `Origin`, `Authorization` and the headers a player adds of
+   its own (`X-...`). Headers yt-dlp sets itself for each request (`Host`,
+   `Range`, `Accept` ...), `Cookie`, `Referer` and the browser's `Sec-...`
+   headers are left out; the list is `skipHeaders` in `headers.go`, and the
+   window checks every header again (name, printable ASCII, length, at most
+   12). The `User-Agent` is kept with the job and passed to yt-dlp as an
+   argument. All others are logins like cookies: they are written into a
+   file next to the cookie file, in yt-dlp's configuration format, which
+   yt-dlp reads with `--config-locations`; the file is deleted with the
+   cookie file. yt-dlp sends these headers with every request of the
+   download, also to another host that serves the parts of the stream.
+2. **The browser's name.** With "Send the site's login along", the
+   `User-Agent` goes with a page too: many sites accept a login only from
+   the browser it was made in.
+3. **The page instead.** When the site refuses the link of a video (HTTP
+   401, 403 or 410, or it calls the link expired), the download tries
+   `pageUrl` once, with the same cookies and `User-Agent` but without the
+   referer and headers of the refused request. The list says "link refused,
+   trying the page instead". If the page does not work either, the download
+   fails with "The site no longer accepts the link of this video": send it
+   again from the browser, and it starts with a fresh link.
+
+None of this gets around DRM, and none of it shows a video the login in the
+browser cannot play.

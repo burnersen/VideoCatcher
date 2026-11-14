@@ -109,6 +109,30 @@ function load(api) {
     check("merge: the markup does not overrule", m[0].kind === "hls" && m[0].master === true && m[0].referer === "https://player.net/e/1", m);
   }
 
+  // The headers of a request that go on with the download: the login and
+  // what the player adds; not what yt-dlp sets itself or what has its own
+  // way (cookies, Referer).
+  {
+    const picked = vc.sentHeaders(h({
+      "User-Agent": "Mozilla/5.0 Test", Authorization: "Bearer abc.def", Origin: "https://player.net", "X-Token": "t1",
+      Cookie: "sid=1", Referer: "https://player.net/e/1", Range: "bytes=0-", Host: "x.net", "Sec-Fetch-Mode": "cors",
+      "If-Range": "1", "Accept-Encoding": "gzip", "X-Client-Data": "abc", "X-Bad": "a\nb", "X-Umlaut": "\u00e4", "X-Empty": "",
+    }));
+    check("request headers worth sending", JSON.stringify(Object.keys(picked).sort()) === JSON.stringify(["Authorization", "Origin", "User-Agent", "X-Token"]), picked);
+    const many = vc.sentHeaders(h(Object.fromEntries([...Array(30)].map((_, i) => ["X-H" + i, "v"]).concat([["User-Agent", "UA"]]))));
+    check("at most 12 headers and the browser's name", Object.keys(many).length === 13 && many["User-Agent"] === "UA", Object.keys(many).length);
+    check("no headers, no trouble", JSON.stringify(vc.sentHeaders(undefined)) === "{}");
+    const goSkip = /var skipHeaders = map\[string\]bool\{([\s\S]*?)\n\}/.exec(fs.readFileSync(path.join(__dirname, "..", "headers.go"), "utf8"))[1];
+    const goNames = [...goSkip.matchAll(/"([a-z-]+)": true/g)].map((m) => m[1]).filter((n) => n !== "user-agent").sort();
+    const jsNames = [...Object.keys(vc.sentHeaders(h(Object.fromEntries(goNames.map((n) => [n, "v"])))))];
+    check("the same headers are left out as in headers.go", goNames.length > 15 && jsNames.length === 0, jsNames);
+
+    // A stream found by its answer keeps the headers of its request.
+    let m = vc.addItem([], { url: "https://x.net/get", kind: "video", via: "net", referer: "https://player.net/e/1", headers: { Authorization: "Bearer 1" }, time: 1 });
+    m = vc.addItem(m, { url: "https://x.net/get", kind: "hls", via: "sniff", master: true, referer: "https://player.net/", time: 2 });
+    check("merge: the headers of the request stay", m[0].kind === "hls" && m[0].headers.Authorization === "Bearer 1", m);
+  }
+
   // What a page reports (content.js): nothing in it is trusted.
   {
     const sender = { url: "https://player.net/e/1", frameId: 3 };
@@ -323,6 +347,46 @@ function load(api) {
   check("embedded player message: its page, the page around it as referer, named by yt-dlp", player.url === "https://player.example/e/1" && player.referer === tab.url && player.fileName === "" && player.pageUrl === tab.url);
   const noRef = vc.buildMessage(tab, { url: "https://cdn.example/x.mp4" });
   check("stream without referer: the page", noRef.referer === tab.url);
+  const withHeaders = vc.buildMessage(tab, { url: "https://cdn.example/x.m3u8", headers: { Authorization: "Bearer 1", "User-Agent": "UA" } });
+  check("stream message: the headers of its request", withHeaders.headers.Authorization === "Bearer 1" && withHeaders.headers["User-Agent"] === "UA");
+  check("page and player: no headers of a request", JSON.stringify(page.headers) === "{}" && JSON.stringify(player.headers) === "{}");
+
+  // The login that goes along: cookies of the video, the page and the
+  // player's frame, from the cookie store of the tab, also the ones the
+  // browser keeps apart for an embedded player; and the browser's name.
+  {
+    const cookie = (domain, name) => ({ domain, path: "/", name, value: "v", session: true });
+    const asked = [];
+    const firefox = load({ cookies: { getAll: async (q) => { asked.push(q); return [cookie(new URL(q.url).hostname, "sid")]; } } });
+    const m1 = await firefox.withLogin(firefox.buildMessage(tab, { url: "https://cdn.example/x.m3u8", frameUrl: "https://player.example/e/1", referer: "https://player.example/e/1" }),
+      { ...tab, id: 7, cookieStoreId: "firefox-container-2" }, { frameUrl: "https://player.example/e/1", referer: "https://player.example/e/1" });
+    check("cookies: video, page and frame, each once", asked.map((q) => new URL(q.url).hostname).join(" ") === "cdn.example site.example player.example", asked);
+    check("cookies: the tab's store, partitioned ones too", asked.every((q) => q.storeId === "firefox-container-2" && q.partitionKey && q.firstPartyDomain === null), asked);
+    check("cookies of all three in the file", ["cdn.example", "site.example", "player.example"].every((d) => m1.cookies.includes(d + "\t")), m1.cookies);
+
+    // Chrome refuses what it does not know (firstPartyDomain) and names the
+    // store of a private window in a list.
+    const chromeAsked = [];
+    const chrome = load({ cookies: {
+      getAll: async (q) => { if ("firstPartyDomain" in q) throw new Error("Unexpected property: 'firstPartyDomain'."); chromeAsked.push(q); return [cookie("site.example", "sid")]; },
+      getAllCookieStores: async () => [{ id: "0", tabIds: [1, 2] }, { id: "1", tabIds: [7] }],
+    } });
+    const m2 = await chrome.withLogin(chrome.buildMessage(tab, null), { ...tab, id: 7 }, null);
+    check("Chrome: the store of the private window, the next question", chromeAsked.length === 1 && chromeAsked[0].storeId === "1" && !!chromeAsked[0].partitionKey && m2.cookies.includes("sid"), chromeAsked);
+    const old = load({ cookies: { getAll: async (q) => { if (Object.keys(q).length > 1) throw new Error("no"); return [cookie("site.example", "sid")]; } } });
+    const m3 = await old.withLogin(old.buildMessage(tab, null), tab, null);
+    check("a browser that only knows the plain question", m3.cookies.includes("sid"));
+    const none = load({ cookies: { getAll: async () => { throw new Error("no"); } } });
+    check("no cookies to read: the message goes without", (await none.withLogin(none.buildMessage(tab, null), tab, null)).cookies === "");
+
+    const withNav = vm.createContext({ URL, console, navigator: { userAgent: "Mozilla/5.0 Browser" }, chrome: { cookies: { getAll: async () => [] } } });
+    vm.runInContext(fs.readFileSync(path.join(src, "common.js"), "utf8"), withNav, { filename: "common.js" });
+    const m4 = await withNav.vc.withLogin(withNav.vc.buildMessage(tab, null), tab, null);
+    check("with the login goes the browser's name", m4.headers["User-Agent"] === "Mozilla/5.0 Browser", m4.headers);
+    const m5 = await withNav.vc.withLogin(withNav.vc.buildMessage(tab, { url: "https://cdn.example/x.m3u8", headers: { "user-agent": "UA of the request" } }), tab, null);
+    check("the name the request had stays", Object.keys(m5.headers).length === 1 && m5.headers["user-agent"] === "UA of the request", m5.headers);
+  }
+
   const goFields = [...fs.readFileSync(path.join(__dirname, "..", "nativehost.go"), "utf8")
     .match(/type nativeMessage struct \{([\s\S]*?)\n\}/)[1].matchAll(/json:"([^"]+)"/g)].map((m) => m[1]);
   for (const k of Object.keys(item).concat("cookies")) check(`field "${k}" is known to the helper`, goFields.includes(k), goFields);

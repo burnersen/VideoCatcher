@@ -77,8 +77,26 @@ type Job struct {
 	// so a paused job still has its login after a restart. Only the name:
 	// the cookies themselves never go into queue.json.
 	CookieName string `json:"cookieName,omitempty"`
+	// HeaderName is the same for the file with the request headers of the
+	// browser (headers.go).
+	HeaderName string `json:"headerName,omitempty"`
+	// PageURL is the page a video link was found on, UserAgent the browser
+	// that found it (both from the extension). A link with a token in it
+	// is only good for a while: when the site refuses it, the job tries
+	// the page instead, once (ViaPage).
+	PageURL   string `json:"pageUrl,omitempty"`
+	UserAgent string `json:"userAgent,omitempty"`
+	ViaPage   bool   `json:"viaPage,omitempty"`
 
 	cookieFile string // from the browser extension; deleted when the job ends
+	headerFile string // the same, for the request headers
+}
+
+// jobExtras is what the browser extension knows beyond the link.
+type jobExtras struct {
+	PageURL    string // the page the link was found on
+	UserAgent  string // the browser's own name for itself
+	HeaderFile string // request headers for yt-dlp, written by intake.go
 }
 
 // Limits (05 K9).
@@ -167,14 +185,21 @@ func (q *queue) load() error {
 		}
 		j.RetryAt = time.Time{} // the wait belonged to the last session; a new start tries at once
 
-		if name := j.CookieName; name != "" && !isFinished(j.Status) {
-			if p := filepath.Join(q.cookieDir, name); filepath.Base(name) == name && fileExists(p) {
-				j.cookieFile = p
-			}
+		if !isFinished(j.Status) {
+			j.cookieFile, j.headerFile = q.loginFile(j.CookieName), q.loginFile(j.HeaderName)
 		}
 		q.jobs = append(q.jobs, j)
 	}
 	return nil
+}
+
+// loginFile is the path of a cookie or header file by the name a job
+// keeps, or "" if there is none any more.
+func (q *queue) loginFile(name string) string {
+	if p := filepath.Join(q.cookieDir, name); name != "" && filepath.Base(name) == name && fileExists(p) {
+		return p
+	}
+	return ""
 }
 
 // saveLocked writes queue.json; q.mu is held.
@@ -213,6 +238,12 @@ func copyJob(j *Job) Job {
 // Add puts a new download into the list. Links from outside (a web page)
 // wait for the user's OK: a page must not be able to start downloads.
 func (q *queue) Add(link string, o DownloadOptions, source, referer, title, cookieFile string) (Job, error) {
+	return q.AddWith(link, o, source, referer, title, cookieFile, jobExtras{})
+}
+
+// AddWith is Add for a link from the browser extension, with what it knows
+// about the page and the request.
+func (q *queue) AddWith(link string, o DownloadOptions, source, referer, title, cookieFile string, x jobExtras) (Job, error) {
 	u, err := checkURL(link)
 	if err != nil {
 		return Job{}, err
@@ -229,9 +260,16 @@ func (q *queue) Add(link string, o DownloadOptions, source, referer, title, cook
 	q.counter++
 	j := &Job{ID: fmt.Sprintf("%x-%d", time.Now().UnixNano(), q.counter), URL: u, Title: title,
 		Source: source, Referer: referer, Options: o, Status: jobWaiting, Stage: "waiting",
-		Added: time.Now(), Files: []string{}, Details: []string{}, ETA: -1, cookieFile: cookieFile}
+		Added: time.Now(), Files: []string{}, Details: []string{}, ETA: -1, cookieFile: cookieFile,
+		headerFile: x.HeaderFile, UserAgent: x.UserAgent}
 	if cookieFile != "" && filepath.Dir(cookieFile) == q.cookieDir {
 		j.CookieName = filepath.Base(cookieFile)
+	}
+	if x.HeaderFile != "" && filepath.Dir(x.HeaderFile) == q.cookieDir {
+		j.HeaderName = filepath.Base(x.HeaderFile)
+	}
+	if page, perr := checkURL(x.PageURL); perr == nil && page != u {
+		j.PageURL = page
 	}
 	if source == "protocol" {
 		j.Status, j.Stage = jobConfirm, "waiting for your OK"
@@ -283,8 +321,10 @@ func (q *queue) removeOrphans() {
 	for _, j := range q.jobs {
 		if !isFinished(j.Status) {
 			keepParts[j.ID] = true
-			if j.cookieFile != "" {
-				keepCookies[filepath.Base(j.cookieFile)] = true
+			for _, f := range []string{j.cookieFile, j.headerFile} {
+				if f != "" {
+					keepCookies[filepath.Base(f)] = true
+				}
 			}
 		}
 	}
@@ -416,11 +456,19 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 	q.notify(j)
 	temp := filepath.Join(q.tempRoot, id)
 	var errLines []string
-	jp := jobPaths{Temp: temp, Cookies: q.cookieFileOf(id)}
+	jp := jobPaths{Temp: temp}
+	jp.Cookies, jp.Headers = q.loginFilesOf(id)
 	if q.proxy != nil {
 		jp.Proxy = q.proxy()
 	}
-	args := buildArgs(j.Options, j.URL, q.ts, q.have, jp, j.Referer)
+	link, referer := j.URL, j.Referer
+	if j.ViaPage {
+		// The page instead of the link found on it: the login (cookies,
+		// browser) still counts, what belonged to the request of the link
+		// does not.
+		link, referer, jp.Headers = j.PageURL, "", ""
+	}
+	args := buildArgs(j.Options, link, q.ts, q.have, jp, referer, j.UserAgent)
 	q.logger.Info("download started", "id", id, "host", hostOf(j.URL))
 
 	err := os.MkdirAll(temp, 0o700)
@@ -515,13 +563,13 @@ func (q *queue) tidyFiles(id string) {
 	q.mu.Unlock()
 }
 
-func (q *queue) cookieFileOf(id string) string {
+func (q *queue) loginFilesOf(id string) (cookies, headers string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if j := q.findLocked(id); j != nil {
-		return j.cookieFile
+		return j.cookieFile, j.headerFile
 	}
-	return ""
+	return "", ""
 }
 
 func (q *queue) findLocked(id string) *Job {
@@ -639,6 +687,20 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		q.Schedule()
 		return
 	}
+	if err != nil && ctx.Err() == nil && !j.ViaPage && j.PageURL != "" && len(j.Files) == 0 && linkRefused(errLines) {
+		// A link with a token that is no longer good (it waited too long,
+		// or it was made for the player alone): the page it was found on
+		// is tried instead, once, with the same login.
+		j.ViaPage, j.Tries = true, 0
+		j.Status, j.Stage, j.Resumable = jobWaiting, "link refused, trying the page instead", false
+		q.logger.Warn("download tries the page instead", "id", id, "host", hostOf(j.URL), "page", hostOf(j.PageURL), "ytdlp", firstLine(strings.Join(errLines, "\n")))
+		q.saveLocked()
+		c := copyJob(j)
+		q.mu.Unlock()
+		q.notify(c)
+		q.Schedule()
+		return
+	}
 	q.dropCookiesLocked(j)
 	j.Resumable = false
 	switch {
@@ -660,6 +722,8 @@ func (q *queue) finish(id string, ctx context.Context, err error, errLines []str
 		var ue *UserError
 		if errors.As(err, &ue) && len(errLines) == 0 {
 			uerr = err // our own error (folder, start of yt-dlp), already explained
+		} else if j.ViaPage {
+			uerr = explainExpired(errLines, err)
 		}
 		j.Status, j.Stage, j.Error = jobFailed, "failed", errorText(uerr)
 		q.logger.Error("download failed", "id", id, "host", hostOf(j.URL), "err", err, "ytdlp", firstLine(strings.Join(errLines, "\n")))
@@ -690,15 +754,18 @@ func sizeOf(files []string) int64 {
 	return n
 }
 
-// dropCookiesLocked deletes the cookie file of a job; q.mu is held.
+// dropCookiesLocked deletes the logins of a job, its cookie file and its
+// file with request headers; q.mu is held.
 func (q *queue) dropCookiesLocked(j *Job) {
-	if j.cookieFile != "" {
-		if rerr := os.Remove(j.cookieFile); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+	for _, f := range []string{j.cookieFile, j.headerFile} {
+		if f == "" {
+			continue
+		}
+		if rerr := os.Remove(f); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
 			q.logger.Warn("cannot remove a cookie file", "err", rerr)
 		}
-		j.cookieFile = ""
 	}
-	j.CookieName = ""
+	j.cookieFile, j.headerFile, j.CookieName, j.HeaderName = "", "", "", ""
 }
 
 // dropPartsLocked deletes the kept parts of a job that will not continue;

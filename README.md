@@ -65,7 +65,7 @@
 - It never overwrites a file that is already in your download folder, and never writes outside the folder you chose.
 - It never leaves half downloads in your folder: unfinished parts live in Video-Catcher's own folder. They are kept while a download is paused and removed when it ends, however it ends.
 - A link from a web page never starts a download by itself. It waits in the list until you click **Download**.
-- Your browser's logins (cookies) are never saved in the list, the log or a command line. A cookie file made for one download is deleted when that download ends.
+- Your browser's logins (cookies, and logins a site keeps in request headers) are never saved in the list, the log or a command line. The files made with them for one download are deleted when that download ends.
 - No telemetry, no account, no advertising.
 
 ## 🧩 Browser extension
@@ -76,6 +76,8 @@ It finds them in four ways, because sites hide their videos differently: by the 
 
 **How to use it:** open the page, start the video (if the page offers several players or hosts, click one), then click the Video-Catcher button in the toolbar and **Download** next to the video. **Send this page** sends the address of the page itself, which is best for the sites yt-dlp knows (YouTube and many more). There is also a right-click menu for pages, links and videos. A video from the extension gets the page title as its file name, and it is downloaded with the settings of the window.
 
+**Sites with a login or a token:** tick **Send the site's login (cookies) along** in the extension's window. The download then goes with the cookies of the page, of the video and of an embedded player (also from a private window or a Firefox container), and as the same browser. For a listed video the extension also passes on what the player sent to get it: where the request came from, a login in a header, the player's own headers. Links like these are often only good for a few minutes, so send a video soon after starting it; if the site refuses the link all the same, Video-Catcher tries the page itself before it gives up ([how it works](docs/browser-bridge.md#links-with-a-token)).
+
 **Install it once:**
 
 1. In Video-Catcher, open **Settings** and turn on **Allow the browser extension**. This tells the browsers where Video-Catcher is (only for your Windows user, no administrator rights).
@@ -84,7 +86,7 @@ It finds them in four ways, because sites hide their videos differently: by the 
    - **Chrome and Edge:** unpack `VideoCatcher-extension-chromium.zip` into a folder that stays (for example `Documents\VideoCatcher-extension`). Open `chrome://extensions` (Edge: `edge://extensions`), turn on **Developer mode**, click **Load unpacked** and choose that folder.
 3. Click the puzzle piece in the toolbar and pin Video-Catcher. The button should say "Connected to Video-Catcher".
 
-**What it may do, and why:** see the requests of the pages and look into the pages themselves (to find videos; it reads and changes nothing on them), keep a list per tab in the browser's memory until the tab or browser closes, add a right-click menu, read a site's cookies only when you tick "Send the site's login along", and talk to Video-Catcher on this PC. It sends nothing to the internet and nothing anywhere before you click. If you moved `VideoCatcher.exe`, start it once from its new place; it updates what the browsers know. After installing or updating the extension, reload the pages that were already open.
+**What it may do, and why:** see the requests of the pages and look into the pages themselves (to find videos; it reads and changes nothing on them), keep a list per tab in the browser's memory until the tab or browser closes, add a right-click menu, read a site's cookies only when you tick "Send the site's login along", remember for a listed video the headers its request had (they leave the browser only with that video, when you click), and talk to Video-Catcher on this PC. It sends nothing to the internet and nothing anywhere before you click. If you moved `VideoCatcher.exe`, start it once from its new place; it updates what the browsers know. After installing or updating the extension, reload the pages that were already open.
 
 The extension cannot get around DRM, and it cannot download what a site keeps from you.
 

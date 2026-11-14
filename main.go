@@ -13,6 +13,7 @@
 //	app.go       everything the page may call; small methods, one job each
 //	appinfo.go   name and version
 //	intake.go    links from outside: --add, videocatcher://, request files
+//	headers.go   request headers a download borrows from the browser
 //	nativehost*.go  the helper the browser extension talks to
 //	queue.go     the download manager: jobs, parallel runs, queue.json
 //	options.go   the settings of a download and yt-dlp's argument list

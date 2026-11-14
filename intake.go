@@ -54,6 +54,12 @@ type intakeRequest struct {
 	Source     string `json:"source"`             // extension, cli, protocol
 	Cookies    string `json:"cookies,omitempty"`  // Netscape cookie file text, only from the extension
 	CookieFile string `json:"-"`                  // where the cookies were written for yt-dlp
+	// Headers are request headers the browser sent for the video (headers.go),
+	// only from the extension. They are split on reading: the User-Agent
+	// stays with the request, the others go into a file for yt-dlp.
+	Headers    map[string]string `json:"headers,omitempty"`
+	HeaderFile string            `json:"-"`
+	UserAgent  string            `json:"-"`
 }
 
 const (
@@ -67,7 +73,7 @@ var requestName = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}\.json$`)
 
 type intake struct {
 	inbox   string // request files of the browser helper
-	cookies string // cookie files for yt-dlp, one per job
+	cookies string // cookie and header files for yt-dlp, one of each per job
 	logger  *slog.Logger
 }
 
@@ -150,6 +156,13 @@ func (in *intake) readRequest(name string) (intakeRequest, error) {
 		}
 		req.Cookies = ""
 	}
+	ua, headers := splitHeaders(req.Headers)
+	req.Headers, req.UserAgent = nil, ua
+	if len(headers) > 0 {
+		if req.HeaderFile, err = in.writeSecret("h-*.conf", headerConfig(headers)); err != nil {
+			in.logger.Warn("request headers not used", "err", err) // the link still goes, only without them
+		}
+	}
 	return req, nil
 }
 
@@ -159,10 +172,16 @@ func (in *intake) writeCookies(text string) (string, error) {
 	if !strings.HasPrefix(text, "# Netscape HTTP Cookie File") && !strings.HasPrefix(text, "# HTTP Cookie File") {
 		return "", errors.New("cookies are not in the Netscape format")
 	}
+	return in.writeSecret("c-*.txt", text)
+}
+
+// writeSecret stores a login of one request (cookies, request headers) in
+// a new file of the cookie folder.
+func (in *intake) writeSecret(pattern, text string) (string, error) {
 	if err := os.MkdirAll(in.cookies, 0o700); err != nil {
 		return "", fmt.Errorf("create cookie folder: %w", err)
 	}
-	f, err := os.CreateTemp(in.cookies, "c-*.txt")
+	f, err := os.CreateTemp(in.cookies, pattern)
 	if err != nil {
 		return "", fmt.Errorf("create cookie file: %w", err)
 	}
