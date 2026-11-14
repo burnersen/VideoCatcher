@@ -78,7 +78,7 @@ var errorRules = []errorRule{
 	{any: []string{"permission denied", "errno 13", "access is denied"},
 		msg:  "VideoCatcher may not write into the download folder",
 		hint: "Choose another folder, or check that no other program has the file open."},
-	{any: []string{"unable to download webpage", "getaddrinfo failed", "name or service not known", "timed out", "connection reset", "connection refused", "network is unreachable", "temporary failure in name resolution", "ssl"},
+	{any: []string{"unable to download webpage", "getaddrinfo failed", "name or service not known", "timed out", "connection reset", "connection refused", "network is unreachable", "temporary failure in name resolution", "ssl", "tunnel connection failed"},
 		msg:  "The site could not be reached",
 		hint: "Check the internet connection and try again.", again: true},
 }

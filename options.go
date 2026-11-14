@@ -306,6 +306,11 @@ func buildArgs(o DownloadOptions, link string, ts toolSet, have func(tool string
 		"-P", "temp:" + jp.Temp,
 		"-o", o.outputTemplate(),
 		"-N", strconv.Itoa(o.Fragments),
+		// A stream is hundreds of pieces. Wait a little longer before each
+		// new try, and never write a file with a piece missing: the job
+		// fails instead and picks up where it stopped on the next try.
+		"--retry-sleep", "fragment:exp=1:20",
+		"--abort-on-unavailable-fragments",
 	}
 	if runtime.GOOS == "windows" {
 		a = append(a, "--windows-filenames")

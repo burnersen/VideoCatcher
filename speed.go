@@ -62,6 +62,9 @@ type limiter struct {
 	sleep  func(time.Duration)
 }
 
+// relayDialPauses are the waits between the attempts to reach a site.
+var relayDialPauses = []time.Duration{500 * time.Millisecond, 2 * time.Second, 5 * time.Second}
+
 func newLimiter() *limiter {
 	return &limiter{now: time.Now, sleep: time.Sleep}
 }
@@ -223,9 +226,9 @@ func (r *relay) tunnel(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "cannot tunnel", http.StatusInternalServerError)
 		return
 	}
-	site, err := r.dial(req.Context(), "tcp", req.Host)
+	site, err := r.dialPatiently(req.Context(), req.Host)
 	if err != nil {
-		r.logger.Debug("relay: cannot reach the site", "err", err)
+		r.logger.Warn("relay: cannot reach the site", "host", req.Host, "err", err)
 		http.Error(w, "cannot reach the site", http.StatusBadGateway)
 		return
 	}
@@ -253,6 +256,25 @@ func (r *relay) tunnel(w http.ResponseWriter, req *http.Request) {
 	}()
 	<-done
 	<-done
+}
+
+// dialPatiently tries a few times before it gives up. yt-dlp repeats a
+// failed fragment at once, so one short hiccup (a name lookup that fails, a
+// server that refuses a moment) would otherwise use up all its retries.
+func (r *relay) dialPatiently(ctx context.Context, host string) (net.Conn, error) {
+	var err error
+	for _, pause := range relayDialPauses {
+		var c net.Conn
+		if c, err = r.dial(ctx, "tcp", host); err == nil {
+			return c, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(pause):
+		}
+	}
+	return r.dial(ctx, "tcp", host)
 }
 
 func closeWrite(c net.Conn) {
