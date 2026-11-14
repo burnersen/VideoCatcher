@@ -285,6 +285,9 @@ type jobPaths struct {
 	// Impersonate is the browser yt-dlp answers like ("chrome", "firefox"),
 	// for sites that turn away everything else; empty for yt-dlp as itself.
 	Impersonate string
+	// FileURLs lets yt-dlp read file links: the link is then a list this
+	// program wrote itself (memlist.go), never one from outside.
+	FileURLs bool
 }
 
 // buildArgs turns the options into yt-dlp's argument list. The link comes
@@ -408,6 +411,9 @@ func buildArgs(o DownloadOptions, link string, ts toolSet, have func(tool string
 	}
 	if jp.Proxy != "" {
 		a = append(a, "--proxy", jp.Proxy)
+	}
+	if jp.FileURLs {
+		a = append(a, "--enable-file-urls")
 	}
 	if jp.Impersonate != "" {
 		a = append(a, "--impersonate", jp.Impersonate)

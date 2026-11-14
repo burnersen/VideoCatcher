@@ -243,7 +243,7 @@
   // How much a find is worth, by where it comes from: "sniff" read the
   // answer itself (page.js), "net" saw the request (background.js), "dom"
   // only saw the page name the link (content.js).
-  const viaRank = (via) => ({ dom: 0, net: 1, sniff: 2 })[via || "net"];
+  const viaRank = (via) => ({ dom: 0, net: 1, sniff: 2, memory: 3 })[via || "net"];
 
   // rank puts what downloads best to the top of the list: a stream with all
   // its qualities, then streams nobody looked into, then one quality of a
@@ -275,6 +275,7 @@
       headers: (net && net.headers) || strong.headers || weak.headers,
       frameUrl: strong.frameUrl || weak.frameUrl || "",
       time: item.time,
+      ...(strong.list ? { list: strong.list, base: strong.base } : {}),
     };
   }
 
@@ -283,13 +284,25 @@
   function addItem(list, item) {
     const all = list || [];
     const old = all.find((x) => x.url === item.url);
-    const rest = all.filter((x) => x.url !== item.url);
+    // A new list from the memory of the same player replaces the old one:
+    // the player started over, and the old list's links are used up.
+    const rest = all.filter((x) => x.url !== item.url && !(item.via === "memory" && x.via === "memory" && x.base === item.base));
     const sorted = [old ? mergeItem(old, item) : item, ...rest];
     sorted.sort((a, b) => rank(a) - rank(b)); // stable: the order stays among equals
     return sorted.slice(0, maxItemsPerTab);
   }
 
   const isWeb = (url) => typeof url === "string" && url.length <= 4096 && /^https?:\/\//i.test(url);
+
+  // A list from memory, as the page passes it: as long as memlist.go takes.
+  const maxListChars = 1536 * 1024;
+
+  // textMark is a short name for a text, to tell two lists apart.
+  function textMark(text) {
+    let h = 5381;
+    for (let i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0;
+    return h.toString(16) + "-" + text.length;
+  }
 
   // pageItems turns a message of content.js into list items. The message
   // comes out of a web page, so nothing in it is trusted: only http(s)
@@ -315,6 +328,16 @@
         continue;
       }
       out.push(item);
+    }
+    // A list the player built in memory. It has no link, so it gets a name
+    // of its own for the list of the tab; what is sent is the text.
+    for (const l of Array.isArray(message.lists) ? message.lists.slice(-1) : []) {
+      if (!l || typeof l.text !== "string" || l.text.length > maxListChars || !/^\uFEFF?\s*#EXTM3U/.test(l.text) || !frame) continue;
+      const d = Number(l.duration);
+      out.push({
+        url: "memory://" + hostOf(frame) + "/" + textMark(l.text), kind: "hls", via: "memory", master: l.master === true,
+        duration: Number.isFinite(d) && d > 0 && d < 1e6 ? Math.round(d) : 0, size: 0, referer: frame, frameUrl, base: frame, list: l.text, time: now,
+      });
     }
     // A player inside a frame: the frame's own address is something yt-dlp
     // often knows, where the page around it says nothing.
@@ -496,6 +519,23 @@
     }
     if (item.kind === "embed") {
       return { type: "add", url: item.url, pageUrl: tab.url, title: tab.title || "", referer: tab.url, fileName: "", headers: {} };
+    }
+    if (item.via === "memory") {
+      // A list the player built in memory: the list goes as text, the link
+      // is the player's page, and the parts are asked for the way the
+      // player asks: from its page, as this browser.
+      const headers = {};
+      try {
+        headers.Origin = new URL(item.base).origin;
+      } catch (e) {
+        // No page, no origin.
+      }
+      const ua = globalThis.navigator && globalThis.navigator.userAgent;
+      if (ua) headers["User-Agent"] = ua;
+      return {
+        type: "add", url: item.base, pageUrl: tab.url, title: tab.title || "", referer: item.base, fileName: tab.title || "",
+        headers, list: item.list,
+      };
     }
     return {
       type: "add", url: item.url, pageUrl: tab.url, title: tab.title || "",

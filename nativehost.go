@@ -77,6 +77,9 @@ type nativeMessage struct {
 	// Headers the browser sent for the video (headers.go); checked by the
 	// window when it reads the request.
 	Headers map[string]string `json:"headers"`
+	// List is an HLS list the player built in the page's memory, as text
+	// (memlist.go); URL is then the page of the player.
+	List string `json:"list"`
 }
 
 // nativeReply is what the extension gets back.
@@ -157,7 +160,7 @@ func (h *nativeHost) add(m nativeMessage) (string, error) {
 		V: requestVersion, URL: link, Source: "extension",
 		PageURL: optionalURL(m.PageURL), Referer: optionalURL(m.Referer),
 		Title: clip(m.Title, maxTitleLen), FileName: clip(m.FileName, maxFileNameLen), Cookies: m.Cookies,
-		Headers: m.Headers,
+		Headers: m.Headers, List: m.List,
 	}
 	data, err := json.Marshal(req)
 	if err != nil {

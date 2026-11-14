@@ -80,6 +80,10 @@ type Job struct {
 	// HeaderName is the same for the file with the request headers of the
 	// browser (headers.go).
 	HeaderName string `json:"headerName,omitempty"`
+	// ListNames are the files of a list the player built in memory
+	// (memlist.go), in the same folder; the first is the one yt-dlp gets
+	// instead of the link.
+	ListNames []string `json:"listNames,omitempty"`
 	// PageURL is the page a video link was found on, UserAgent the browser
 	// that found it (both from the extension). A link with a token in it
 	// is only good for a while: when the site refuses it, the job tries
@@ -99,6 +103,7 @@ type Job struct {
 
 	cookieFile string // from the browser extension; deleted when the job ends
 	headerFile string // the same, for the request headers
+	listFiles  []string
 }
 
 // jobExtras is what the browser extension knows beyond the link.
@@ -106,6 +111,7 @@ type jobExtras struct {
 	PageURL    string // the page the link was found on
 	UserAgent  string // the browser's own name for itself
 	HeaderFile string // request headers for yt-dlp, written by intake.go
+	ListFiles  []string
 }
 
 // Limits (05 K9).
@@ -196,6 +202,9 @@ func (q *queue) load() error {
 
 		if !isFinished(j.Status) {
 			j.cookieFile, j.headerFile = q.loginFile(j.CookieName), q.loginFile(j.HeaderName)
+			for _, n := range j.ListNames {
+				j.listFiles = append(j.listFiles, q.loginFile(n))
+			}
 		}
 		q.jobs = append(q.jobs, j)
 	}
@@ -277,6 +286,11 @@ func (q *queue) AddWith(link string, o DownloadOptions, source, referer, title, 
 	if x.HeaderFile != "" && filepath.Dir(x.HeaderFile) == q.cookieDir {
 		j.HeaderName = filepath.Base(x.HeaderFile)
 	}
+	for _, f := range x.ListFiles {
+		if filepath.Dir(f) == q.cookieDir {
+			j.listFiles, j.ListNames = append(j.listFiles, f), append(j.ListNames, filepath.Base(f))
+		}
+	}
 	if page, perr := checkURL(x.PageURL); perr == nil && page != u {
 		j.PageURL = page
 	}
@@ -330,7 +344,7 @@ func (q *queue) removeOrphans() {
 	for _, j := range q.jobs {
 		if !isFinished(j.Status) {
 			keepParts[j.ID] = true
-			for _, f := range []string{j.cookieFile, j.headerFile} {
+			for _, f := range append([]string{j.cookieFile, j.headerFile}, j.listFiles...) {
 				if f != "" {
 					keepCookies[filepath.Base(f)] = true
 				}
@@ -473,7 +487,8 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 	temp := filepath.Join(q.tempRoot, id)
 	var errLines []string
 	jp := jobPaths{Temp: temp}
-	jp.Cookies, jp.Headers = q.loginFilesOf(id)
+	var list string
+	jp.Cookies, jp.Headers, list = q.loginFilesOf(id)
 	if q.proxy != nil {
 		jp.Proxy = q.proxy()
 	}
@@ -483,6 +498,10 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 		// browser) still counts, what belonged to the request of the link
 		// does not.
 		link, referer, jp.Headers = j.PageURL, "", ""
+	} else if list != "" {
+		// A list the player built in memory: yt-dlp reads the file made of
+		// it. The link of the job stays the player's page, for the list.
+		link, jp.FileURLs = fileURL(list), true
 	}
 	if j.AsBrowser && !j.NoBrowser {
 		jp.Impersonate = browserTarget(j.UserAgent)
@@ -497,6 +516,10 @@ func (q *queue) run(ctx context.Context, id string, j Job) {
 			if hide != "" {
 				// yt-dlp may name its proxy in an error; the password stays here.
 				line = strings.ReplaceAll(line, hide, "***")
+			}
+			if list != "" {
+				// Nor the folder of this user, which the files of a list are in.
+				line = strings.ReplaceAll(strings.ReplaceAll(line, fileURL(q.cookieDir), "list"), q.cookieDir, "list")
 			}
 			l := parseLine(line)
 			switch l.Kind {
@@ -582,13 +605,16 @@ func (q *queue) tidyFiles(id string) {
 	q.mu.Unlock()
 }
 
-func (q *queue) loginFilesOf(id string) (cookies, headers string) {
+func (q *queue) loginFilesOf(id string) (cookies, headers, list string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if j := q.findLocked(id); j != nil {
-		return j.cookieFile, j.headerFile
+		if len(j.listFiles) > 0 {
+			list = j.listFiles[0]
+		}
+		return j.cookieFile, j.headerFile, list
 	}
-	return "", ""
+	return "", "", ""
 }
 
 func (q *queue) findLocked(id string) *Job {
@@ -801,7 +827,7 @@ func sizeOf(files []string) int64 {
 // dropCookiesLocked deletes the logins of a job, its cookie file and its
 // file with request headers; q.mu is held.
 func (q *queue) dropCookiesLocked(j *Job) {
-	for _, f := range []string{j.cookieFile, j.headerFile} {
+	for _, f := range append([]string{j.cookieFile, j.headerFile}, j.listFiles...) {
 		if f == "" {
 			continue
 		}
@@ -810,6 +836,7 @@ func (q *queue) dropCookiesLocked(j *Job) {
 		}
 	}
 	j.cookieFile, j.headerFile, j.CookieName, j.HeaderName = "", "", "", ""
+	j.listFiles, j.ListNames = nil, nil
 }
 
 // dropPartsLocked deletes the kept parts of a job that will not continue;

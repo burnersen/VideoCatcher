@@ -10,7 +10,9 @@
 // an HLS list, a DASH or a Smooth Streaming manifest is one.
 //
 // It only tells content.js the link of such an answer (an event on the
-// document), nothing of its content, and makes no request of its own. For
+// document), nothing of its content, and makes no request of its own. One
+// thing has no link: a list the player builds in the page's memory. That
+// list itself is passed on, because it is all there is of the stream. For
 // the report a user can copy when nothing is found, it also notes in a few
 // words how the player gets its video (a list built in memory, a worker). The
 // page gets its answers unchanged; whatever goes wrong in here is
@@ -23,6 +25,7 @@
   const eventName = "videocatcher-found";
   const headChars = 2048; // a manifest shows itself in its first lines
   const maxChars = 512 * 1024; // no list of a stream is longer
+  const maxList = 1536 * 1024; // but one built in memory holds all its qualities in itself
   const againAfterMs = 15000;
   const told = new Map(); // link -> when it was last reported
 
@@ -67,9 +70,9 @@
       return;
     }
     // A list the page built itself and keeps in memory has no link a
-    // downloader could open; the popup says so.
+    // downloader could open: the list itself is passed on.
     if (!/^https?:/i.test(link)) {
-      tell({ blob: true });
+      fromMemory(text, found);
       return;
     }
     const now = Date.now();
@@ -77,6 +80,21 @@
     if (told.size > 500) told.clear();
     told.set(link, now);
     tell({ url: link, kind: found.kind, master: found.master, duration: found.duration });
+  }
+
+  // fromMemory passes on a list the player built in memory, which has no
+  // link: the text is all there is of it. Each list once; a quality that
+  // is read after the list of qualities it is written into says nothing new.
+  const passed = new Set();
+  let passedMaster = false;
+  function fromMemory(text, found) {
+    tell({ blob: true });
+    if (found.kind !== "hls" || text.length > maxList || (passedMaster && !found.master)) return;
+    const mark = text.length + ":" + text.slice(-80);
+    if (passed.has(mark) || passed.size >= 6) return;
+    passed.add(mark);
+    passedMaster = passedMaster || found.master === true;
+    tell({ list: text, master: found.master, duration: found.duration });
   }
 
   // --- fetch ---
@@ -242,11 +260,11 @@
         try {
           const b = args[0];
           if (b && typeof b.slice === "function" && typeof b.size === "number") {
-            if (b.size > 0 && b.size <= maxChars && !/^(image|video|audio|font)\//.test(b.type || "")) {
-              b.slice(0, maxChars).text().then((text) => {
-                const found = inspect(text);
+            if (b.size > 0 && b.size <= maxList && !/^(image|video|audio|font)\//.test(b.type || "")) {
+              b.slice(0, headChars).text().then((head) => (worthReading(head) || inspect(head) ? b.text() : "")).then((text) => {
+                const found = text && inspect(text);
                 if (!found) return;
-                tell({ blob: true });
+                fromMemory(text, found);
                 note("list built in memory: " + describe(text, found));
               }).catch(() => {}); // unreadable: nothing to note
             }

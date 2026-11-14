@@ -245,7 +245,8 @@ function load(api) {
     events.length = 0;
     await win.fetch("blob:https://x.net/1-2-3");
     await settle();
-    check("page.js: a list kept in memory is told as hidden", events.length === 1 && found()[0].blob === true && !found()[0].url, found());
+    check("page.js: a list kept in memory is told as hidden, and passed on as it is", events.length === 2 && found()[0].blob === true && !found()[0].url &&
+      found()[1].list === master && found()[1].master === true, found());
 
     events.length = 0;
     now += 20000;
@@ -326,6 +327,7 @@ function load(api) {
     const w = new win.Worker("https://x.net/js/hls.worker.js?v=secret");
     await settle();
     const notes = found().filter((d) => d.note).map((d) => d.note);
+    const lists = found().filter((d) => typeof d.list === "string");
     check("page.js: the page's own calls still do their work", blobUrl === "blob:https://x.net/1" && made.length === 3 && w instanceof PageWorker && w.url.endsWith("v=secret"));
     check("page.js: a list built in memory is told as hidden and noted", found().some((d) => d.blob === true) &&
       notes.includes("list built in memory: hls one quality, 12 s, 3 entries, first: img.net .jpg ?, key AES-128 at k.net (no ending) ?"), notes);
@@ -338,7 +340,42 @@ function load(api) {
     const nested = found().filter((d) => d.note).map((d) => d.note);
     check("page.js: a quality written into the list itself is described", nested.join() ===
       "list built in memory: hls master, 1 entries, first: data: -> hls one quality, 20 s, 4 entries, first: cdn.net .html, no key", nested);
+    check("page.js: a list built in memory is passed on once, whole", lists.length === 1 && lists[0].list === list && lists[0].master === false && lists[0].duration === 12, lists.map((x) => [x.master, x.duration, x.list === list, x.list.length, list.length]));
+    events.length = 0;
+    win.URL.createObjectURL(new Blob([list]));
+    await settle();
+    check("page.js: the same list is not passed on twice", found().filter((d) => typeof d.list === "string").length === 0, found().length);
     check("page.js: no key and nothing of a list in a note", notes.length === 3 && notes.every((n) => !/secret|token|EXTINF|seg-1/.test(n)), notes);
+  }
+
+  // A list the player built in memory: an entry of its own in the list of
+  // the tab, sent as text with the player's page as its link.
+  {
+    const sender = { url: "https://player.example/player/index.php?data=1", frameId: 3 };
+    const text = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\ndata:application/vnd.apple.mpegurl;base64,AAAA\n";
+    const got = vc.pageItems({ lists: [{ text, master: true, duration: 0 }] }, sender, 5);
+    check("list from memory: one entry, named after its player", got.length === 1 && got[0].via === "memory" && got[0].kind === "hls" && got[0].master === true &&
+      got[0].base === sender.url && got[0].list === text && /^memory:\/\/player\.example\//.test(got[0].url), got);
+    const bad = vc.pageItems({ lists: [{ text: "<html>#EXTM3U" }, { text: 5 }, null] }, sender, 5).concat(
+      vc.pageItems({ lists: [{ text }] }, { url: "about:blank", frameId: 3 }, 5),
+      vc.pageItems({ lists: [{ text: "#EXTM3U\n" + "x".repeat(1600 * 1024) }] }, sender, 5));
+    check("list from memory: only a list, of a web page, not endless", bad.length === 0, bad);
+    let l = vc.addItem([], { url: "https://player.example/player/index.php?data=1", kind: "embed", via: "dom" });
+    l = vc.addItem(l, got[0]);
+    check("list from memory: on top of the player it comes from", l[0].via === "memory" && l[1].kind === "embed", l.map((x) => x.kind));
+    const again = vc.pageItems({ lists: [{ text: text + "#EXT-X-ENDLIST\n", master: true }] }, sender, 6)[0];
+    l = vc.addItem(l, again);
+    check("list from memory: a new one replaces the old one", l.filter((x) => x.via === "memory").length === 1 && l[0].list === again.list, l.length);
+    const stay = vc.addItem(l, { ...again, time: 7 });
+    check("list from memory: found again, it keeps its text", stay[0].list === again.list && stay[0].base === sender.url);
+    const withNav = vm.createContext({ URL, console, navigator: { userAgent: "Mozilla/5.0 Browser" }, chrome: {} });
+    vm.runInContext(fs.readFileSync(path.join(src, "common.js"), "utf8"), withNav, { filename: "common.js" });
+    const m = withNav.vc.buildMessage({ url: "https://site.example/watch/1", title: "A title" }, got[0]);
+    check("list from memory: sent as text, with the player's page as link and referer", m.url === sender.url && m.referer === sender.url && m.list === text &&
+      m.pageUrl === "https://site.example/watch/1" && m.fileName === "A title", m);
+    check("list from memory: asked for the way the player asks", m.headers.Origin === "https://player.example" && m.headers["User-Agent"] === "Mozilla/5.0 Browser", m.headers);
+    const report = vc.reportText({ items: l });
+    check("list from memory: the report names it, without its text", /hls memory master memory:/.test(report) && !/EXT-X/.test(report), report);
   }
 
   // The report a user copies when nothing is found: links are shortened so
@@ -418,11 +455,15 @@ function load(api) {
       JSON.stringify({ url: "https://cdn.net/get?id=1", kind: "hls", master: true, duration: 0 }),
       JSON.stringify({ blob: true }), "not json", { url: "https://cdn.net/object" }, "x".repeat(9000), "null",
       JSON.stringify({ note: "Worker started: x.net .js" }), JSON.stringify({ note: "y".repeat(300) }),
+      JSON.stringify({ list: "#EXTM3U\n" + "#EXTINF:4,\nhttps://cdn.net/1.ts\n".repeat(600), master: false, duration: 2400 }),
+      JSON.stringify({ url: "https://cdn.net/big", kind: "hls", pad: "z".repeat(9000) }),
     ];
     const sent = await run(false, elements, events);
     const all = sent.flatMap((m) => m.items);
     check("content.js: one message for what it found", sent.length === 1 && sent[0].type === "vc-found", sent);
     check("content.js: a short note of page.js goes along", JSON.stringify(sent[0].notes) === '["Worker started: x.net .js"]', sent[0].notes);
+    check("content.js: a list from memory goes along, long as it is", sent[0].lists.length === 1 && sent[0].lists[0].text.length > 8192 && sent[0].lists[0].duration === 2400, sent[0].lists.length);
+    check("content.js: nothing else may be that long", !all.some((x) => x.url === "https://cdn.net/big"), all);
     check("content.js: the stream from page.js", all.some((x) => x.url === "https://cdn.net/get?id=1" && x.via === "sniff" && x.master === true), all);
     check("content.js: videos named by the page, each once", all.filter((x) => x.via === "dom").map((x) => x.url.split("/").pop() + ":" + x.kind).sort().join(" ") === "film.mp4:video film.webm:video talk.mp3:audio", all);
     check("content.js: a video from memory and a player in a frame", sent[0].blob === true && sent[0].embed === true, sent);
@@ -497,7 +538,7 @@ function load(api) {
 
   const goFields = [...fs.readFileSync(path.join(__dirname, "..", "nativehost.go"), "utf8")
     .match(/type nativeMessage struct \{([\s\S]*?)\n\}/)[1].matchAll(/json:"([^"]+)"/g)].map((m) => m[1]);
-  for (const k of Object.keys(item).concat("cookies")) check(`field "${k}" is known to the helper`, goFields.includes(k), goFields);
+  for (const k of Object.keys(item).concat("cookies", "list")) check(`field "${k}" is known to the helper`, goFields.includes(k), goFields);
 
   // The way to the app: a missing helper is a reply, not an exception.
   {
