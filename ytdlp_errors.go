@@ -23,18 +23,21 @@ type errorRule struct {
 	again bool
 }
 
+const loginHint = "Log in to the site in your browser, then choose it at \"Logins from browser\" (More options) and try again. " +
+	"Or send the video with the browser extension and tick \"Send the site's login (cookies) along\"."
+
 // The first matching rule wins, so the specific ones come first. The texts
 // are taken from yt-dlp's source and from real error reports.
 var errorRules = []errorRule{
 	{any: []string{"cookie database", "failed to decrypt", "dpapi", "app-bound", "could not find chrome cookies", "could not find firefox cookies", "could not copy"},
 		msg:  "The cookies of the chosen browser could not be read",
 		hint: "Close that browser completely and try again. Chrome and Edge often block this on Windows; Firefox works best."},
-	{any: []string{"sign in to confirm", "not a bot", "login required", "requires authentication", "only available for registered users", "you need to log in", "this video is private", "private video", "members-only", "join this channel", "premium", "subscriber", "purchase", "paid"},
+	{any: []string{"sign in to confirm", "not a bot", "login required", "http error 401", "unauthorized", "requires authentication", "only available for registered users", "you need to log in", "this video is private", "private video", "members-only", "join this channel", "premium", "subscriber", "purchase", "paid"},
 		msg:  "The site only shows this video to logged-in users",
-		hint: "Log in to the site in your browser, then choose it at \"Logins from browser\" (More options) and try again."},
+		hint: loginHint},
 	{any: []string{"confirm your age", "age-restricted", "age restricted", "inappropriate for some users"},
 		msg:  "The video has an age check",
-		hint: "Log in to the site in your browser, then choose it at \"Logins from browser\" (More options) and try again."},
+		hint: loginHint},
 	{any: []string{"drm"},
 		msg:  "The video is protected against copying (DRM)",
 		hint: "yt-dlp cannot download protected videos."},
@@ -81,13 +84,8 @@ func explainYtDlp(errorLines []string, exitErr error) error {
 	if cause == "" && exitErr != nil {
 		cause = exitErr.Error()
 	}
-	all := strings.ToLower(cause)
-	for _, r := range errorRules {
-		for _, s := range r.any {
-			if strings.Contains(all, s) {
-				return userError(errors.New(cause), r.msg, r.hint)
-			}
-		}
+	if r := ruleFor(cause); r != nil {
+		return userError(errors.New(cause), r.msg, r.hint)
 	}
 	short := firstLine(cause)
 	if len(short) > 200 {
@@ -105,18 +103,62 @@ func explainYtDlp(errorLines []string, exitErr error) error {
 // The first matching rule decides, like in explainYtDlp: "HTTP Error 404"
 // in an "unable to download webpage" line is no reason to try again.
 func worthAnotherTry(errorLines []string) bool {
-	all := strings.ToLower(strings.Join(errorLines, "\n"))
+	r := ruleFor(strings.Join(errorLines, "\n"))
+	return r != nil && r.again
+}
+
+// ruleFor is the first rule that matches yt-dlp's error text, or nil.
+func ruleFor(text string) *errorRule {
+	all := strings.ToLower(text)
 	if all == "" {
-		return false
+		return nil
 	}
-	for _, r := range errorRules {
+	for i, r := range errorRules {
 		for _, s := range r.any {
 			if strings.Contains(all, s) {
-				return r.again
+				return &errorRules[i]
 			}
 		}
 	}
+	return nil
+}
+
+// linkRefused says whether the site turned the link itself down: no
+// permission (401, 403) or gone (410). That is what a link with a token in
+// it looks like when the token is too old or was made for someone else. A
+// job from the browser extension then tries the page the link was found on
+// (queue.go).
+func linkRefused(errorLines []string) bool {
+	all := strings.ToLower(strings.Join(errorLines, "\n"))
+	for _, s := range []string{"http error 401", "http error 403", "http error 410", "unauthorized", "forbidden", "expired"} {
+		if strings.Contains(all, s) {
+			return true
+		}
+	}
 	return false
+}
+
+// expiredMsg and expiredHint are for a link from the browser that the site
+// refused, after the page it was found on did not work either.
+const (
+	expiredMsg  = "The site no longer accepts the link of this video"
+	expiredHint = "Such links are only good for a short time, and often only for the player in the browser. " +
+		"Open the page again, start the video and send it once more; tick \"Send the site's login (cookies) along\" if you are logged in there."
+)
+
+// explainExpired explains the end of a job that tried the page after its
+// link was refused. When the page gave a clear reason (login, DRM, country),
+// that reason counts; when yt-dlp simply found nothing on the page, the
+// user is told what really happened: the link was too old.
+func explainExpired(errorLines []string, exitErr error) error {
+	cause := strings.Join(errorLines, "\n")
+	if r := ruleFor(cause); r != nil && !linkRefused(errorLines) && !strings.Contains(strings.ToLower(cause), "unsupported url") {
+		return userError(errors.New(cause), r.msg, r.hint)
+	}
+	if cause == "" && exitErr != nil {
+		cause = exitErr.Error()
+	}
+	return userError(errors.New(cause), expiredMsg, expiredHint)
 }
 
 func firstLine(s string) string {

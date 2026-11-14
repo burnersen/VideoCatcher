@@ -39,7 +39,7 @@ func pair(args []string, flag, value string) bool {
 func TestBuildArgsBasics(t *testing.T) {
 	o := testOptions(t)
 	ts := newToolSet(t.TempDir())
-	a := buildArgs(o, "https://example.org/v", ts, allTools, jobPaths{Temp: "T"}, "")
+	a := buildArgs(o, "https://example.org/v", ts, allTools, jobPaths{Temp: "T"}, "", "")
 	if a[len(a)-2] != "--" || a[len(a)-1] != "https://example.org/v" {
 		t.Fatalf("the link must come last, after --: %v", a[len(a)-3:])
 	}
@@ -52,7 +52,7 @@ func TestBuildArgsBasics(t *testing.T) {
 	if !slices.Contains(a, "--ignore-config") || !slices.Contains(a, "--no-playlist") {
 		t.Errorf("%v", a)
 	}
-	b := buildArgs(o, "https://example.org/v", ts, noTools, jobPaths{Temp: "T"}, "")
+	b := buildArgs(o, "https://example.org/v", ts, noTools, jobPaths{Temp: "T"}, "", "")
 	if slices.Contains(b, "--ffmpeg-location") || slices.Contains(b, "--js-runtimes") {
 		t.Errorf("tools that are not there are passed: %v", b)
 	}
@@ -64,7 +64,7 @@ func TestNeverOverwritesExistingFiles(t *testing.T) {
 	o := testOptions(t)
 	for _, q := range qualityChoices {
 		o.Quality = q
-		a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "")
+		a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "", "")
 		if !slices.Contains(a, "--no-overwrites") || slices.Contains(a, "--force-overwrites") {
 			t.Fatalf("quality %s: %v", q, a)
 		}
@@ -75,12 +75,12 @@ func TestQualityAndAudio(t *testing.T) {
 	o := testOptions(t)
 	ts := newToolSet(t.TempDir())
 	o.Quality, o.Container = "1080", "mp4"
-	a := buildArgs(o, "https://x.org", ts, allTools, jobPaths{Temp: "T"}, "")
+	a := buildArgs(o, "https://x.org", ts, allTools, jobPaths{Temp: "T"}, "", "")
 	if !pair(a, "-S", "res:1080,ext:mp4:m4a") || !pair(a, "--merge-output-format", "mp4") {
 		t.Errorf("1080 mp4: %v", a)
 	}
 	o.Quality, o.AudioFormat, o.AudioQuality = "audio", "mp3", "192"
-	a = buildArgs(o, "https://x.org", ts, allTools, jobPaths{Temp: "T"}, "")
+	a = buildArgs(o, "https://x.org", ts, allTools, jobPaths{Temp: "T"}, "", "")
 	if !pair(a, "-f", "ba/b") || !slices.Contains(a, "-x") || !pair(a, "--audio-format", "mp3") || !pair(a, "--audio-quality", "192K") {
 		t.Errorf("audio: %v", a)
 	}
@@ -88,7 +88,7 @@ func TestQualityAndAudio(t *testing.T) {
 		t.Errorf("audio with a video container: %v", a)
 	}
 	o.FormatID = "137+140"
-	a = buildArgs(o, "https://x.org", ts, allTools, jobPaths{Temp: "T"}, "")
+	a = buildArgs(o, "https://x.org", ts, allTools, jobPaths{Temp: "T"}, "", "")
 	if !pair(a, "-f", "137+140") || slices.Contains(a, "-x") {
 		t.Errorf("format id: %v", a)
 	}
@@ -104,7 +104,7 @@ func TestSubtitleModes(t *testing.T) {
 	}
 	for mode, want := range cases {
 		o.SubMode = mode
-		a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "")
+		a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "", "")
 		for _, w := range want {
 			if !slices.Contains(a, w) || !pair(a, "--sub-langs", "de,en") {
 				t.Errorf("%s: %v", mode, a)
@@ -119,12 +119,12 @@ func TestSubtitleModes(t *testing.T) {
 func TestCookiesAndReferer(t *testing.T) {
 	o := testOptions(t)
 	o.Cookies = "firefox"
-	a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "https://page.org/a")
+	a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "https://page.org/a", "")
 	if !pair(a, "--cookies-from-browser", "firefox") || !pair(a, "--add-headers", "Referer:https://page.org/a") {
 		t.Errorf("%v", a)
 	}
 	// A cookie file from the browser extension wins over the browser.
-	a = buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T", Cookies: "C"}, "")
+	a = buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T", Cookies: "C"}, "", "")
 	if !pair(a, "--cookies", "C") || slices.Contains(a, "--cookies-from-browser") {
 		t.Errorf("%v", a)
 	}
@@ -205,7 +205,7 @@ func TestOwnFileName(t *testing.T) {
 	if err := o.validate(); err != nil {
 		t.Fatal(err)
 	}
-	a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "")
+	a := buildArgs(o, "https://x.org", newToolSet(t.TempDir()), allTools, jobPaths{Temp: "T"}, "", "")
 	if !pair(a, "-o", "Holiday 100%% [cut].%(ext)s") {
 		t.Errorf("own name not used: %v", a)
 	}

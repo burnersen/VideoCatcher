@@ -457,20 +457,24 @@ func (a *App) accept(req intakeRequest) {
 		// ("index-v1-a1"); the page's title is the better name.
 		o.FileName = safeFileName(req.FileName)
 	}
+	dropLogin := func() {
+		for _, f := range []string{req.CookieFile, req.HeaderFile} {
+			if f != "" {
+				os.Remove(f) // ignore: a leftover is removed at the next start (removeOrphans)
+			}
+		}
+	}
 	// The same link again while it still waits or runs (a second click in
 	// the browser): the one in the list is enough.
 	if k, ok := a.queue.Known(req.URL); ok && !isFinished(k.Status) {
-		if req.CookieFile != "" {
-			os.Remove(req.CookieFile) // ignore: the job in the list has its own
-		}
+		dropLogin() // the job in the list has its own
 		a.uiLogKey("info", "log.duplicate", "This link is already in the list: "+k.URL, map[string]string{"url": k.URL})
 		return
 	}
-	j, err := a.queue.Add(req.URL, o, req.Source, req.Referer, req.Title, req.CookieFile)
+	j, err := a.queue.AddWith(req.URL, o, req.Source, req.Referer, req.Title, req.CookieFile,
+		jobExtras{PageURL: req.PageURL, UserAgent: req.UserAgent, HeaderFile: req.HeaderFile})
 	if err != nil {
-		if req.CookieFile != "" {
-			os.Remove(req.CookieFile) // ignore: the job that would have used it does not exist
-		}
+		dropLogin() // the job that would have used it does not exist
 		a.logError(err)
 		return
 	}

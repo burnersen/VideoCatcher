@@ -7,7 +7,7 @@
 // as text (textContent), never as markup.
 "use strict";
 
-const { api, sendToApp, cookiesFor, buildMessage, hostOf, shortPath, formatSize, formatDuration } = globalThis.vc;
+const { api, sendToApp, withLogin, buildMessage, hostOf, shortPath, formatSize, formatDuration } = globalThis.vc;
 
 const msg = (key, ...subs) => api.i18n.getMessage(key, subs.map(String)) || key;
 const $ = (id) => document.getElementById(id);
@@ -62,7 +62,7 @@ const popup = {
     resultEl.className = "result";
     resultEl.textContent = msg("sending");
     const m = buildMessage(this.tab, item);
-    if ($("with-cookies").checked) m.cookies = await cookiesFor([m.url, this.tab.url]);
+    if ($("with-cookies").checked) await withLogin(m, this.tab, item);
     const reply = await sendToApp(m);
     this.showResult(resultEl, reply);
     button.disabled = reply.ok;

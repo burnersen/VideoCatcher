@@ -8,8 +8,8 @@ message, the link and the version, for a bug report.
 | Message | What to do |
 |---|---|
 | The cookies of the chosen browser could not be read | Close that browser completely and try again. Chrome and Edge often block this on Windows; Firefox works best. |
-| The site only shows this video to logged-in users | Log in to the site in your browser, then choose it at "Logins from browser" (More options) and try again. |
-| The video has an age check | Log in to the site in your browser, then choose it at "Logins from browser" (More options) and try again. |
+| The site only shows this video to logged-in users | Log in to the site in your browser, then choose it at "Logins from browser" (More options) and try again. Or send the video with the browser extension and tick "Send the site's login (cookies) along". |
+| The video has an age check | Log in to the site in your browser, then choose it at "Logins from browser" (More options) and try again. Or send the video with the browser extension and tick "Send the site's login (cookies) along". |
 | The video is protected against copying (DRM) | yt-dlp cannot download protected videos. |
 | The video is not available in your country | The site decides this by the location of your internet connection. |
 | The video has not started yet | Try again when it is live or has been published. |
@@ -18,6 +18,7 @@ message, the link and the version, for a bug report.
 | FFmpeg is missing for this download | Click "Check for updates" so VideoCatcher can install it, then try again. |
 | The site is limiting downloads right now | Wait a few minutes and try again, or download fewer videos at the same time. |
 | The site refused the download | Click "Check for updates"; a new yt-dlp often fixes this. Cookies from your browser can help too. |
+| The site no longer accepts the link of this video | Such links are only good for a short time, and often only for the player in the browser. Open the page again, start the video and send it once more; tick "Send the site's login (cookies) along" if you are logged in there. Video-Catcher has tried the page the video was found on before it says this; while it does, the download says "link refused, trying the page instead". |
 | The video is not available | It may have been deleted or made private. Check the link in your browser. |
 | The disk is full | Free some space or choose another download folder. |
 | VideoCatcher may not write into the download folder | Choose another folder, or check that no other program has the file open. |

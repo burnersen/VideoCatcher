@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // What background.js and popup.js share: which requests are videos, how the
-// list of a tab is kept, the cookie file format, and the way to
-// Video-Catcher. Plain functions without
+// list of a tab is kept, the login that goes with a download (cookies and
+// request headers), and the way to Video-Catcher. Plain functions without
 // browser state, so extension_check.js can test them without a browser.
 // Everything stays inside this function: background.js and popup.js are
 // loaded next to this file and share one global scope with it. A "const api"
@@ -72,6 +72,37 @@
     if (range) return Number(range[1]);
     const len = Number(header(headers, "content-length"));
     return Number.isFinite(len) && len > 0 ? len : 0;
+  }
+
+  // Request headers that are not passed on with a download: yt-dlp sets
+  // them itself for each request, they have their own way (Cookie, Referer),
+  // or they describe the browser and not the login. The same list as in
+  // headers.go, which checks again.
+  const skipHeaders = new Set(["accept", "accept-encoding", "accept-language", "cache-control", "connection",
+    "content-length", "content-type", "cookie", "dnt", "expect", "host", "keep-alive", "pragma", "priority", "range",
+    "referer", "te", "trailer", "transfer-encoding", "upgrade", "upgrade-insecure-requests", "via", "x-client-data"]);
+  const skipHeaderPrefix = /^(sec-|proxy-|if-)/;
+  const maxHeaders = 12;
+  const maxHeaderValue = 4096;
+
+  // sentHeaders picks, from the headers of a request, what a site may want
+  // to see again when Video-Catcher asks for the same video: the browser's
+  // name (User-Agent), where the request came from (Origin), a login in a
+  // header (Authorization) and the headers a player adds of its own
+  // ("X-Token"). Sites that work with tokens check these.
+  function sentHeaders(headers) {
+    const out = {};
+    let n = 0;
+    for (const h of headers || []) {
+      const name = String(h.name || "");
+      const low = name.toLowerCase();
+      const value = String(h.value || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(name) || skipHeaders.has(low) || skipHeaderPrefix.test(low)) continue;
+      if (!value || value.length > maxHeaderValue || !/^[\x20-\x7e]+$/.test(value)) continue;
+      if (low !== "user-agent" && ++n > maxHeaders) continue;
+      out[name] = value;
+    }
+    return out;
   }
 
   function kindOfPath(path) {
@@ -241,6 +272,7 @@
       duration: strong.duration || weak.duration || 0,
       size: strong.size || weak.size || 0,
       referer: (net && net.referer) || strong.referer || weak.referer || "",
+      headers: (net && net.headers) || strong.headers || weak.headers,
       frameUrl: strong.frameUrl || weak.frameUrl || "",
       time: item.time,
     };
@@ -305,41 +337,95 @@
     }
   }
 
-  // cookiesFor collects the cookies for the given links (the video and the
-  // page) in the Netscape format.
-  async function cookiesFor(urls) {
-    const all = [];
-    for (const url of new Set(urls.filter((u) => /^https?:/i.test(u || "")))) {
+  // storeOf names the cookie store of a tab: a private window and a
+  // Firefox container have cookies of their own. Firefox says it on the
+  // tab; Chrome and Edge list the tabs of each store.
+  async function storeOf(tab) {
+    if (!tab) return undefined;
+    if (tab.cookieStoreId) return tab.cookieStoreId;
+    try {
+      const stores = await api.cookies.getAllCookieStores();
+      const store = stores.find((s) => (s.tabIds || []).includes(tab.id));
+      return store ? store.id : undefined;
+    } catch (e) {
+      return undefined; // the browser's usual store
+    }
+  }
+
+  // cookiesOf reads the cookies for one link. The browsers keep the
+  // cookies of an embedded player apart from the ones the same site has as
+  // a page of its own (partitioned, Firefox also by first party): asked
+  // plainly, they are left out, and it is the player that has the login.
+  // Each browser knows other words for "all of them", and refuses the ones
+  // it does not know, so the questions go from the most complete to the
+  // plain one.
+  async function cookiesOf(url, storeId) {
+    const store = storeId ? { storeId } : {};
+    const questions = [
+      { url, ...store, partitionKey: {}, firstPartyDomain: null }, // Firefox
+      { url, ...store, partitionKey: {} }, // Chrome, Edge
+      { url, ...store },
+      { url },
+    ];
+    for (const q of questions) {
       try {
-        all.push(...(await api.cookies.getAll({ url })));
+        return await api.cookies.getAll(q);
       } catch (e) {
-        // A link the browser cannot read cookies for: the download goes
-        // without them, which is what happens without the option too.
+        // Not a question for this browser: the next one.
       }
     }
+    // A link the browser cannot read cookies for: the download goes
+    // without them, which is what happens without the option too.
+    return [];
+  }
+
+  // cookiesFor collects the cookies for the given links (the video, the
+  // page, the player's frame) in the Netscape format, from the cookie store
+  // of the tab.
+  async function cookiesFor(urls, tab) {
+    const all = [];
+    const storeId = await storeOf(tab);
+    for (const url of new Set(urls.filter((u) => /^https?:/i.test(u || "")))) {
+      all.push(...(await cookiesOf(url, storeId)));
+    }
     return all.length > 0 ? netscapeCookies(all) : "";
+  }
+
+  // withLogin adds the site's login to a message: the cookies of the
+  // video, the page and, for a found video, of the frame it plays in; and
+  // the browser's name, because a login is often only good for the browser
+  // it was made in.
+  async function withLogin(message, tab, item) {
+    const urls = [message.url, tab && tab.url, item && item.frameUrl, item && item.referer];
+    message.cookies = await cookiesFor(urls, tab);
+    const ua = globalThis.navigator && globalThis.navigator.userAgent;
+    const has = Object.keys(message.headers || {}).some((k) => k.toLowerCase() === "user-agent");
+    if (ua && !has) message.headers = { ...message.headers, "User-Agent": ua };
+    return message;
   }
 
   // buildMessage makes the "add" message for a found video or for the page.
   // A video gets the page title as its file name, because a stream link has
   // no name of its own ("index-v1-a1.m3u8"); a page is named by yt-dlp. An
   // embedded player is a page too, and its host mostly wants to see the page
-  // it is embedded in.
+  // it is embedded in. A video goes with the headers its request had in the
+  // browser (sentHeaders); a page is asked for anew, so it has none.
   function buildMessage(tab, item) {
     if (!item) {
-      return { type: "add", url: tab.url, pageUrl: tab.url, title: tab.title || "", referer: "", fileName: "" };
+      return { type: "add", url: tab.url, pageUrl: tab.url, title: tab.title || "", referer: "", fileName: "", headers: {} };
     }
     if (item.kind === "embed") {
-      return { type: "add", url: item.url, pageUrl: tab.url, title: tab.title || "", referer: tab.url, fileName: "" };
+      return { type: "add", url: item.url, pageUrl: tab.url, title: tab.title || "", referer: tab.url, fileName: "", headers: {} };
     }
     return {
       type: "add", url: item.url, pageUrl: tab.url, title: tab.title || "",
-      referer: item.referer || item.frameUrl || tab.url, fileName: tab.title || "",
+      referer: item.referer || item.frameUrl || tab.url, fileName: tab.title || "", headers: { ...item.headers },
     };
   }
 
   globalThis.vc = {
     api, nativeHost, maxItemsPerTab, classify, totalSize, header, netscapeCookies, hostOf, shortPath,
-    formatSize, formatDuration, addItem, rank, kindOfUrl, pageItems, sendToApp, cookiesFor, buildMessage,
+    formatSize, formatDuration, addItem, rank, kindOfUrl, pageItems, sendToApp, cookiesFor, withLogin, buildMessage,
+    sentHeaders,
   };
 })();

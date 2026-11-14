@@ -280,12 +280,13 @@ func checkURL(raw string) (string, error) {
 type jobPaths struct {
 	Temp    string // unfinished parts; removed when the job ends, kept while it is paused
 	Cookies string // a cookie file for this job, or empty
+	Headers string // a file with request headers from the browser (headers.go), or empty
 	Proxy   string // VideoCatcher's own relay for the speed limit (speed.go), or empty
 }
 
 // buildArgs turns the options into yt-dlp's argument list. The link comes
 // last, after "--", so it can never be read as an option.
-func buildArgs(o DownloadOptions, link string, ts toolSet, have func(tool string) bool, jp jobPaths, referer string) []string {
+func buildArgs(o DownloadOptions, link string, ts toolSet, have func(tool string) bool, jp jobPaths, referer, userAgent string) []string {
 	a := []string{
 		"--ignore-config", // a yt-dlp.conf somewhere on the PC must not change what the window shows
 		"--color", "never",
@@ -391,6 +392,16 @@ func buildArgs(o DownloadOptions, link string, ts toolSet, have func(tool string
 	}
 	if referer != "" {
 		a = append(a, "--add-headers", "Referer:"+referer)
+	}
+	if userAgent != "" {
+		// The browser the link comes from: a login or a token is often
+		// only good for the browser it was made in.
+		a = append(a, "--add-headers", "User-Agent:"+userAgent)
+	}
+	if jp.Headers != "" {
+		// Logins in headers stay off the command line. --ignore-config
+		// does not stop a file that is named here.
+		a = append(a, "--config-locations", jp.Headers)
 	}
 	if jp.Proxy != "" {
 		a = append(a, "--proxy", jp.Proxy)
