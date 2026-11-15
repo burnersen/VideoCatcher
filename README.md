@@ -19,7 +19,7 @@
 
 <img src="docs/screenshot.png" alt="The Video-Catcher window: a looked-up video with thumbnail, title and quality, subtitle and file name options on the left, and the download list on the right with two running downloads, one waiting and two finished" width="860">
 
-<sub>The real window with made-up example downloads.</sub>
+<sub>The window itself (its real page) with made-up example downloads.</sub>
 
 </div>
 
