@@ -11,13 +11,15 @@
 [![Built with Wails](https://img.shields.io/badge/Built%20with-Wails%20v2-DF0000)](#building-it-yourself)
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?logo=go)](#building-it-yourself)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](#license)
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/burnersen)
-
 **[⬇️ Download the latest release](https://github.com/burnersen/VideoCatcher/releases/latest)** · **[🌐 Website](https://tech.burnersen.de/en/tools/videocatcher-en/)** · **[☕ Buy me a coffee](https://ko-fi.com/burnersen)**
 
 <sub>🇩🇪 Auf Deutsch: [tech.burnersen.de/tools/videocatcher](https://tech.burnersen.de/tools/videocatcher/)</sub>
 
 *Free for everyone, at home or at work. Open source under the [GPLv3](#license).*
+
+<img src="docs/screenshot.png" alt="The Video-Catcher window: a looked-up video with thumbnail, title and quality, subtitle and file name options on the left, and the download list on the right with two running downloads, one waiting and two finished" width="860">
+
+<sub>The real window with made-up example downloads.</sub>
 
 </div>
 
@@ -97,6 +99,8 @@ It finds them in four ways, because sites hide their videos differently: by the 
 The extension cannot get around DRM, and it cannot download what a site keeps from you.
 
 ## 🔧 Settings
+
+<img src="docs/settings.png" alt="The Video-Catcher settings dialog: parallel downloads, language, default folder, close button behaviour and browser integration" width="560">
 
 Everything can be set in the window (**Settings**, and "Use the current download options as default"). The same settings live in a text file you can edit too: `%APPDATA%\VideoCatcher\VideoCatcher.ini`. Your own comments in that file stay when the window saves.
 
@@ -183,3 +187,7 @@ GPL-3.0-only, see [LICENSE](LICENSE). Free to use, at home and at work. yt-dlp (
 ## 💬 Feedback
 
 Found a bug or have an idea? [Open an issue](https://github.com/burnersen/VideoCatcher/issues). Please attach the log file (see above) and say what you did and what happened. [docs/troubleshooting.md](docs/troubleshooting.md) explains the messages of the window.
+
+## ☕ Support
+
+Video-Catcher is free and made in my spare time, on my own hardware and electricity bill. If it saved you time and you'd like to say thanks, you can [drop a little something in the tip jar on Ko-fi](https://ko-fi.com/burnersen), it keeps motivation and coffee flowing. ☕ Completely optional, and either way: thank you for using it!
