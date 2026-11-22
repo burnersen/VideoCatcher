@@ -62,7 +62,7 @@
 - **Links from outside:** `VideoCatcher.exe --add <link>`, `videocatcher://` links and a bookmarklet ([how it works](docs/browser-bridge.md)).
 - **English and German,** light or dark like Windows.
 
-### What it never does
+### What it is built not to do
 
 - It never overwrites a file that is already in your download folder, and never writes outside the folder you chose.
 - It never leaves half downloads in your folder: unfinished parts live in Video-Catcher's own folder. They are kept while a download is paused and removed when it ends, however it ends.
@@ -191,3 +191,9 @@ Found a bug or have an idea? [Open an issue](https://github.com/burnersen/VideoC
 ## ☕ Support
 
 Video-Catcher is free and made in my spare time, on my own hardware and electricity bill. If it saved you time and you'd like to say thanks, you can [drop a little something in the tip jar on Ko-fi](https://ko-fi.com/burnersen), it keeps motivation and coffee flowing. ☕ Completely optional, and either way: thank you for using it!
+
+## ⚠️ Disclaimer
+
+Video-Catcher is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. You are responsible for what you download: respect the rights of others and the terms of the sites you use.
+
+Where this README describes what Video-Catcher does, checks or never does, that is how it is designed to work, not a promise or guarantee: software can have bugs, and systems, services and other programs do not always behave as expected. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See sections 15 and 16 of the [license](LICENSE).
